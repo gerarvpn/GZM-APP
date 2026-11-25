@@ -18,6 +18,9 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
+internal fun shouldRestoreGzmProfile(hasUsableSelectedProfile: Boolean, hasEncryptedConfigSnapshot: Boolean): Boolean =
+    !hasUsableSelectedProfile && hasEncryptedConfigSnapshot
+
 data class GzmToken(val baseUrl: String, val sub: String)
 
 data class GzmStatus(
@@ -219,7 +222,9 @@ object GzmPanel {
             if (selected != current) MmkvManager.setSelectServer(selected)
             return
         }
-        val stored = GzmCrypto.readSecure(F_CONFIG) ?: return
+        val stored = GzmCrypto.readSecure(F_CONFIG)
+        if (!shouldRestoreGzmProfile(hasUsableSelectedProfile = false, hasEncryptedConfigSnapshot = stored != null)) return
+        stored ?: return
         val links = runCatching {
             val arr = JSONArray(String(stored))
             (0 until arr.length()).map { arr.getString(it) }

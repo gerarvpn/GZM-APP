@@ -195,13 +195,15 @@ object GzmAuto {
             val wifiOpt = GzmSettings.bool(GzmSettings.K_AUTO_WIFI)
             val mobOpt = GzmSettings.bool(GzmSettings.K_AUTO_MOBILE)
             if (!wifiOpt && !mobOpt) return
-            if (!GzmPanel.hasToken() || !GzmPanel.hasConfig()) return
+            if (!GzmPanel.hasToken()) return
+            // Recover server entries from the encrypted config snapshot before checking whether
+            // an auto-connect can proceed; MMKV's selected-profile index may need rebuilding.
+            GzmPanel.ensureProfile()
+            if (!GzmPanel.hasConfig() || MmkvManager.getSelectServer().isNullOrEmpty()) return
             if (!GzmGeoAssets.ensure(ctx)) {
                 Log.e(TAG, "No se puede conectar: faltan geosite.dat/geoip.dat en los assets locales")
                 return
             }
-            val st = GzmPanel.loadStatus()
-            if (st != null && !st.isActive) return
             val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             var wifi = false
             var cell = false
@@ -248,6 +250,8 @@ class GzmBootReceiver : BroadcastReceiver() {
                     GzmUpdate.cleanupAfterSuccessfulInstall(context.applicationContext)
                 }
                 GzmSettings.initializeAppSettings(context.applicationContext)
+                // Rebuild the selected server profile from its encrypted local snapshot after reboot.
+                GzmPanel.ensureProfile()
                 GzmAuto.apply(context.applicationContext)
                 if (GzmPanel.hasToken()) GzmSyncWorker.schedule(context.applicationContext)
                 if (a == Intent.ACTION_MY_PACKAGE_REPLACED && GzmPanel.reconnectAfterUpdate()) {

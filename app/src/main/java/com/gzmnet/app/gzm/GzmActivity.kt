@@ -635,15 +635,14 @@ if (vm.ui.value.starting) vm.stopFallback()
 }, 1200)
 return
 }
-if (!ui.assetsReady || !ui.hasConfig) {
+if (!canStartFromLocalConfig(ui.hasToken, ui.hasConfig, ui.assetsReady)) {
 vm.startFailed(ui.error ?: "La cuenta todavía se está preparando. Espera un momento y vuelve a tocar conectar.")
 if (GzmPanel.hasToken()) vm.refresh()
 return
 }
-if (!ui.offline && ui.status != null && !ui.status.isActive) {
-vm.startFailed(ui.status.message.ifBlank { "La cuenta no está activa." })
-return
-}
+// A cached account status can be stale after a device reboot. If the local encrypted
+// server profile exists, let the VPN start immediately; a fresh panel response can stop it
+// later if the account was actually revoked or disabled.
 GzmPanel.setReconnectAfterUpdate(true)
 vm.beginStart()
 val intent = VpnService.prepare(this)

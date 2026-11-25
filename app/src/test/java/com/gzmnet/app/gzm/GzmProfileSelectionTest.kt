@@ -6,6 +6,13 @@ import org.junit.jupiter.api.Test
 
 class GzmProfileSelectionTest {
     @Test
+    fun `rebuild a missing selected profile from the encrypted local snapshot`() {
+        assertEquals(true, shouldRestoreGzmProfile(hasUsableSelectedProfile = false, hasEncryptedConfigSnapshot = true))
+        assertEquals(false, shouldRestoreGzmProfile(hasUsableSelectedProfile = true, hasEncryptedConfigSnapshot = true))
+        assertEquals(false, shouldRestoreGzmProfile(hasUsableSelectedProfile = false, hasEncryptedConfigSnapshot = false))
+    }
+
+    @Test
     fun `keeps selected profile only when it belongs to imported group and is usable`() {
         val selected = selectUsableGzmProfile("second", listOf("first", "second")) { it != "first" }
 

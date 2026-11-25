@@ -3,9 +3,11 @@ package com.gzmnet.app.gzm
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.system.Os
 import android.util.Base64
 import android.util.Log
 import java.io.File
+import java.io.FileOutputStream
 import java.io.RandomAccessFile
 import java.security.KeyStore
 import java.security.SecureRandom
@@ -76,12 +78,14 @@ object GzmCrypto {
     fun writeSecure(name: String, plain: ByteArray) {
         val dir = ctx().filesDir
         val tmp = File(dir, "$name.tmp")
-        tmp.writeBytes(encrypt(plain))
-        val dst = File(dir, name)
-        if (!tmp.renameTo(dst)) {
-            dst.delete()
-            check(tmp.renameTo(dst)) { "no se pudo guardar $name" }
+        FileOutputStream(tmp).use { output ->
+            output.write(encrypt(plain))
+            output.fd.sync()
         }
+        val dst = File(dir, name)
+        // Atomic replacement preserves the last good server snapshot if the device loses power
+        // during a write; never delete the old profile as a fallback before the new file is ready.
+        Os.rename(tmp.absolutePath, dst.absolutePath)
     }
 
     fun readSecure(name: String): ByteArray? {
