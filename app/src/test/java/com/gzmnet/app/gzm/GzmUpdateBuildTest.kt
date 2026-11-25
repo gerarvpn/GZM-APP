@@ -14,4 +14,19 @@ class GzmUpdateBuildTest {
     fun `does not mistake unrelated digits for a release build number`() {
         assertNull(parseGzmReleaseBuild("GZMNET preview 7"))
     }
+
+    @Test
+    fun `rejects empty or short downloads and permits unknown content length only after bytes arrive`() {
+        assertEquals(false, isGzmUpdateDownloadComplete(0, -1))
+        assertEquals(true, isGzmUpdateDownloadComplete(2048, -1))
+        assertEquals(false, isGzmUpdateDownloadComplete(2047, 2048))
+        assertEquals(true, isGzmUpdateDownloadComplete(2048, 2048))
+    }
+
+    @Test
+    fun `accepts only zip based apk header`() {
+        assertEquals(true, isGzmApkZipHeader(byteArrayOf(0x50, 0x4b, 0x03, 0x04)))
+        assertEquals(false, isGzmApkZipHeader("<html".toByteArray()))
+        assertEquals(false, isGzmApkZipHeader(byteArrayOf(0x50, 0x4b)))
+    }
 }

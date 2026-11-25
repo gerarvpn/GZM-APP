@@ -478,7 +478,10 @@ _ui.update { it.copy(updBusy = true, updText = "Buscando…", updAvailable = fal
 val rel = GzmUpdate.latest()
 _ui.update {
 when {
-rel == null -> it.copy(updBusy = false, updText = "No se pudo comprobar. Revisa tu internet.")
+rel == null -> {
+GzmDiagnostics.recordMessage(getApplication(), "Actualización", "No se pudo consultar la actualización en GitHub.")
+it.copy(updBusy = false, updText = "No se pudo comprobar. Revisa tu internet o la conexión de la VPN.")
+}
 rel.build > GzmUpdate.currentBuild() -> it.copy(updBusy = false, updAvailable = true, updText = "Nueva versión disponible: ${rel.name}")
 else -> it.copy(updBusy = false, updText = "Ya tienes la última versión")
 }
@@ -497,7 +500,9 @@ while (true) {
 delay(500)
 val p = withContext(Dispatchers.IO) { GzmUpdate.progress(getApplication(), id) }
 if (p == -1) {
-_ui.update { it.copy(updBusy = false, updProgress = -1, updText = "La descarga falló. Inténtalo otra vez.") }
+val reason = GzmUpdate.downloadError(id) ?: "Error desconocido al descargar el instalador."
+GzmDiagnostics.recordMessage(getApplication(), "Descarga de actualización", reason)
+_ui.update { it.copy(updBusy = false, updProgress = -1, updText = "No se pudo descargar la actualización. Revisa internet y vuelve a intentarlo.") }
 return@launch
 }
 _ui.update { it.copy(updProgress = if (p < 0) 0 else p) }
@@ -508,7 +513,8 @@ _ui.update { it.copy(pendingUpdateInstall = true, updBusy = false, updProgress =
 launchPendingInstall(askPermission = true)
 } catch (e: Exception) {
 pendingInstallId = -1L
-_ui.update { it.copy(updBusy = false, updProgress = -1, updText = e.message ?: "No se pudo descargar la actualización.") }
+GzmDiagnostics.record(getApplication(), "Descarga de actualización", e)
+_ui.update { it.copy(updBusy = false, updProgress = -1, updText = "No se pudo descargar la actualización. Revisa internet y vuelve a intentarlo.") }
 }
 }
 }

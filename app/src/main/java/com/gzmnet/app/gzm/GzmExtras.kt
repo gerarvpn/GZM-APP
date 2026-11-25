@@ -1,7 +1,6 @@
 package com.gzmnet.app.gzm
 
 import android.app.ActivityManager
-import android.app.DownloadManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -12,6 +11,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.Uri
 import android.net.VpnService
+import androidx.core.content.FileProvider
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
@@ -25,10 +25,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.FileOutputStream
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.URL
 import java.net.HttpURLConnection
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 object GzmSettings {
@@ -250,66 +256,146 @@ data class GzmRelease(val build: Int, val name: String)
 internal fun parseGzmReleaseBuild(name: String): Int? =
     Regex("""(?i)\bbuild\s+(\d+)\b""").find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
 
+internal fun isGzmUpdateDownloadComplete(receivedBytes: Long, expectedBytes: Long): Boolean =
+    receivedBytes > 0L && (expectedBytes <= 0L || receivedBytes == expectedBytes)
+
+internal fun isGzmApkZipHeader(header: ByteArray): Boolean =
+    header.size >= 4 && header[0] == 0x50.toByte() && header[1] == 0x4b.toByte() &&
+        ((header[2] == 0x03.toByte() && header[3] == 0x04.toByte()) ||
+            (header[2] == 0x05.toByte() && header[3] == 0x06.toByte()) ||
+            (header[2] == 0x07.toByte() && header[3] == 0x08.toByte()))
+
 /** Actualización desde la propia app, usando el último Release de GitHub. */
 object GzmUpdate {
     private const val REPO = "gerarvpn/GZM-APP"
     const val APK_URL = "https://github.com/$REPO/releases/latest/download/GZMNET.apk"
     private const val FILE = "GZMNET-update.apk"
+    private const val PARTIAL_FILE = "$FILE.part"
+
+    private class DownloadState {
+        val progress = AtomicInteger(0)
+        @Volatile var error: String? = null
+    }
+
+    private val nextDownloadId = AtomicLong(System.currentTimeMillis())
+    private val downloads = ConcurrentHashMap<Long, DownloadState>()
 
     fun currentBuild(): Int = BuildConfig.VERSION_CODE % 1_000_000
     fun currentName(): String = BuildConfig.VERSION_NAME
 
     /** null = no se pudo consultar. */
     suspend fun latest(): GzmRelease? = withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
         try {
-            val c = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
-            c.connectTimeout = 10000
-            c.readTimeout = 12000
-            c.setRequestProperty("Accept", "application/vnd.github+json")
-            c.setRequestProperty("User-Agent", "GZMNET-App")
-            if (c.responseCode != 200) return@withContext null
-            val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
+            connection = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
+            connection.connectTimeout = 10000
+            connection.readTimeout = 12000
+            connection.setRequestProperty("Accept", "application/vnd.github+json")
+            connection.setRequestProperty("User-Agent", "GZMNET-App")
+            if (connection.responseCode != 200) return@withContext null
+            val o = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
             val name = o.optString("name")
             val b = parseGzmReleaseBuild(name) ?: return@withContext null
             GzmRelease(b, name)
         } catch (e: Exception) {
             null
+        } finally {
+            connection?.disconnect()
         }
     }
 
+    /**
+     * Download inside GZMNET's own process instead of Android DownloadManager's system UID.
+     * GZMNET's UID is deliberately excluded from its VPN so Xray's own upstream sockets do not
+     * loop back into the TUN. DownloadManager uses a different UID, so its release download was
+     * routed through that same tunnel and could stall/fail while the VPN was connected.
+     */
     fun startDownload(ctx: Context): Long {
-        val dir = ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS)
-        File(dir, FILE).delete()
-        val req = DownloadManager.Request(Uri.parse("$APK_URL?gzm_build=${System.currentTimeMillis()}"))
-            .setTitle("GZMNET")
-            .setDescription("Descargando actualización")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
-            .setDestinationInExternalFilesDir(ctx, android.os.Environment.DIRECTORY_DOWNLOADS, FILE)
-        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        return dm.enqueue(req)
+        val appContext = ctx.applicationContext
+        val id = nextDownloadId.incrementAndGet()
+        val state = DownloadState()
+        downloads[id] = state
+        thread(name = "gzm-update-download", isDaemon = true) {
+            downloadApk(appContext, id, state)
+        }
+        return id
     }
 
-    /** Devuelve porcentaje 0..100, 100 = listo, -1 = falló, -2 = pendiente sin datos. */
-    fun progress(ctx: Context, id: Long): Int {
-        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        dm.query(DownloadManager.Query().setFilterById(id)).use { c ->
-            if (!c.moveToFirst()) return -1
-            val status = c.getInt(c.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
-            if (status == DownloadManager.STATUS_FAILED) return -1
-            if (status == DownloadManager.STATUS_SUCCESSFUL) return 100
-            val total = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
-            val done = c.getLong(c.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
-            return if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 99) else -2
+    private fun downloadApk(context: Context, id: Long, state: DownloadState) {
+        var connection: HttpURLConnection? = null
+        val target = File(context.cacheDir, FILE)
+        val partial = File(context.cacheDir, PARTIAL_FILE)
+        try {
+            partial.delete()
+            connection = URL("$APK_URL?gzm_build=$id").openConnection() as HttpURLConnection
+            connection.connectTimeout = 20000
+            connection.readTimeout = 45000
+            connection.instanceFollowRedirects = true
+            connection.useCaches = false
+            connection.setRequestProperty("User-Agent", "GZMNET-App")
+            connection.setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream")
+            val status = connection.responseCode
+            if (status != HttpURLConnection.HTTP_OK) {
+                error("GitHub respondió HTTP $status al descargar el instalador.")
+            }
+            val total = connection.contentLengthLong
+            var received = 0L
+            BufferedInputStream(connection.inputStream).use { input ->
+                FileOutputStream(partial).use { fileOutput ->
+                    BufferedOutputStream(fileOutput).use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            received += count
+                            if (total > 0) state.progress.set(((received * 100L) / total).toInt().coerceIn(0, 99))
+                        }
+                        output.flush()
+                        fileOutput.fd.sync()
+                    }
+                }
+            }
+            if (!partial.exists() || partial.length() != received || !isGzmUpdateDownloadComplete(received, total)) {
+                error("La descarga del APK llegó vacía o incompleta ($received de $total bytes).")
+            }
+            val apkHeader = ByteArray(4)
+            partial.inputStream().use { input ->
+                if (input.read(apkHeader) != apkHeader.size || !isGzmApkZipHeader(apkHeader)) {
+                    error("GitHub no devolvió un instalador APK válido.")
+                }
+            }
+            if (target.exists() && !target.delete()) error("No se pudo reemplazar el instalador anterior.")
+            if (!partial.renameTo(target)) {
+                partial.copyTo(target, overwrite = true)
+                partial.delete()
+            }
+            state.progress.set(100)
+        } catch (failure: Exception) {
+            state.error = failure.message?.take(300) ?: failure.javaClass.simpleName
+            state.progress.set(-1)
+            partial.delete()
+        } finally {
+            connection?.disconnect()
         }
     }
+
+    /** Devuelve porcentaje 0..100, 100 = listo, -1 = falló, -2 = pendiente. */
+    fun progress(ctx: Context, id: Long): Int = downloads[id]?.let { state ->
+        if (state.error != null) -1 else state.progress.get()
+    } ?: -1
+
+    fun downloadError(id: Long): String? = downloads[id]?.error
 
     fun canInstall(ctx: Context): Boolean = Build.VERSION.SDK_INT < 26 || ctx.packageManager.canRequestPackageInstalls()
 
     /** true = se abrió el instalador; false = falta permitir instalar apps de esta fuente. */
     fun install(ctx: Context, id: Long): Boolean {
-        val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val uri = dm.getUriForDownloadedFile(id)
-            ?: throw IllegalStateException("No se encontró el APK descargado. Descarga la actualización otra vez.")
+        val state = downloads[id]
+        val apk = File(ctx.applicationContext.cacheDir, FILE)
+        if (state?.progress?.get() != 100 || !apk.isFile || apk.length() <= 0L) {
+            throw IllegalStateException("No se encontró el APK completo. Descarga la actualización otra vez.")
+        }
         if (!canInstall(ctx)) {
             ctx.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + ctx.packageName))
@@ -317,8 +403,9 @@ object GzmUpdate {
             )
             return false
         }
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.cache", apk)
         val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE)
-            .setData(uri)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
         ctx.startActivity(installIntent)
         return true
