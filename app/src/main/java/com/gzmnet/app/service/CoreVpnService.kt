@@ -23,6 +23,8 @@ import com.gzmnet.app.helper.MessageHelper
 import com.gzmnet.app.util.LogUtil
 import com.gzmnet.app.util.Utils
 import java.lang.ref.SoftReference
+import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal fun shouldReuseEstablishedVpn(coreRunning: Boolean, interfaceReady: Boolean): Boolean =
@@ -34,6 +36,11 @@ class CoreVpnService : VpnService(), ServiceControl {
     private var isRunning = false
     private var tun2SocksService: Tun2SocksControl? = null
     private val isStartingLock = AtomicBoolean(false)
+    // Starting the native Go/Xray core can take seconds on low-end TVs. Never block the
+    // service main thread: doing so also stalls lifecycle/stop commands and looks like a hang.
+    private val coreStartExecutor = Executors.newSingleThreadExecutor(ThreadFactory { task ->
+        Thread(task, "gzm-xray-start").apply { priority = Thread.NORM_PRIORITY }
+    })
 
     override fun onCreate() {
         super.onCreate()
@@ -72,6 +79,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         }
 
         unlockStart()
+        coreStartExecutor.shutdownNow()
         NotificationManager.cancelNotification()
     }
 
@@ -108,17 +116,37 @@ class CoreVpnService : VpnService(), ServiceControl {
     }
 
     override fun startService() {
-        if (!::mInterface.isInitialized) {
-            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Interface not initialized")
-            return
-        }
-        if (!CoreServiceManager.startCoreLoop(mInterface)) {
-            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
+        try {
+            coreStartExecutor.execute {
+                try {
+                    if (!::mInterface.isInitialized) {
+                        error("La interfaz VPN no quedó lista.")
+                    }
+                    if (!CoreServiceManager.startCoreLoop(mInterface)) {
+                        LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
+                        stopAllService()
+                        return@execute
+                    }
+                } catch (failure: Throwable) {
+                    val detail = failure.message?.take(180).orEmpty()
+                    LogUtil.e(AppConfig.TAG, "StartCore-VPN: Core startup threw ${failure.javaClass.simpleName}: $detail", failure)
+                    stopAllService()
+                    MessageHelper.sendMsg2UI(
+                        this,
+                        AppConfig.MSG_STATE_START_FAILURE,
+                        detail.ifBlank { "Xray no pudo iniciar el túnel. Revisa el perfil del servidor e inténtalo otra vez." },
+                    )
+                }
+            }
+        } catch (failure: Exception) {
+            LogUtil.e(AppConfig.TAG, "StartCore-VPN: Unable to queue Xray startup", failure)
             stopAllService()
-            MessageHelper.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, "")
-            return
+            MessageHelper.sendMsg2UI(
+                this,
+                AppConfig.MSG_STATE_START_FAILURE,
+                "No se pudo iniciar el servicio Xray. Cierra y vuelve a abrir GZMNET.",
+            )
         }
-
     }
 
     override fun stopService() {

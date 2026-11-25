@@ -31,6 +31,7 @@ Android exige que las conexiones del propio cliente VPN salgan por la red subyac
 
 ## Estado de verificación
 
-- Proyecto fuente transformado y revisado estáticamente; todavía falta compilar el proyecto nuevo.
-- No se ejecutaron pruebas de unidad ni compilación local: el entorno no tiene Java/Android SDK.
+- El arranque de Xray se inicia en un hilo de trabajo dedicado para mantener disponible el hilo principal del servicio.
+- La pantalla de inicio se dibuja con el estado guardado mientras se recuperan perfiles y se preparan los datos de Xray en segundo plano; mientras termina, el botón indica que está preparando.
+- En la nueva build deben volver a ejecutarse las pruebas enfocadas de selección de perfil, error temporal del panel, decisión de reutilizar VPN y ping.
 - No se probó en un teléfono ni en una TV física; no afirmar que el tráfico ya está arreglado hasta ejecutar las pruebas anteriores.

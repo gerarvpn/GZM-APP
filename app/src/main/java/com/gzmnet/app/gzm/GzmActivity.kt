@@ -229,10 +229,20 @@ private suspend fun prepareGeoAssets(): Boolean = withContext(Dispatchers.IO) {
 GzmGeoAssets.ensure(getApplication<Application>())
 }
 private fun reload() {
+// Render the cached account and connection screen immediately. Large Xray geo files and
+// profile recovery are prepared in the background so opening GZMNET never waits on file I/O.
+_ui.update {
+it.copy(
+    hasToken = GzmPanel.hasToken(),
+    status = GzmPanel.loadStatus(),
+    hasConfig = GzmPanel.hasConfig(),
+    initialized = true,
+).let(loadSettings())
+}
 viewModelScope.launch {
 withContext(Dispatchers.IO) { GzmSettings.ensureVpnMode() }
-val assetsReady = prepareGeoAssets()
 withContext(Dispatchers.IO) { GzmPanel.ensureProfile() }
+val assetsReady = prepareGeoAssets()
 _ui.update {
 it.copy(
 hasToken = GzmPanel.hasToken(), status = GzmPanel.loadStatus(),
@@ -497,7 +507,6 @@ runCatching { getApplication<Application>().unregisterReceiver(receiver) }
 class GzmActivity : ComponentActivity() {
 private val vm: GzmViewModel by viewModels()
 private var connectivityManager: ConnectivityManager? = null
-private var startAttemptId = 0L
 private val networkCallback = object : ConnectivityManager.NetworkCallback() {
 override fun onAvailable(network: Network) { runOnUiThread { vm.onNetworkAvailable() } }
 }
@@ -544,8 +553,13 @@ super.onDestroy()
 private fun toggle() {
 runCatching { GzmSettings.ensureVpnMode() }
 val ui = vm.ui.value
+if (ui.starting) {
+GzmPanel.setReconnectAfterUpdate(false)
+LauncherManager.stopService(this)
+vm.stopFallback()
+return
+}
 if (ui.running) {
-startAttemptId++
 GzmPanel.setReconnectAfterUpdate(false)
 // Do not leave the power control disabled while waiting for an optional service broadcast.
 // Android can keep the UI process alive across an APK update while the old VPN service exits.
@@ -577,17 +591,12 @@ val intent = VpnService.prepare(this)
 if (intent == null) startVpnNow() else vpnPermission.launch(intent)
 }
 private fun startVpnNow() {
-val attempt = ++startAttemptId
 val ok = runCatching { LauncherManager.startServiceFromToggle(this) }.getOrElse {
 vm.startFailed("No se pudo iniciar. Inténtalo otra vez."); false
 }
 if (!ok) {
 vm.startFailed(if (GzmPanel.hasConfig() && MmkvManager.getSelectServer().isNullOrEmpty()) "No hay un servidor seleccionado en este dispositivo. Abre Ajustes, actualiza los servidores y vuelve a intentar." else "Android no pudo iniciar el servicio VPN. Comprueba el permiso de VPN y vuelve a intentar; tu cuenta y configuración se conservaron.")
-return
 }
-Handler(Looper.getMainLooper()).postDelayed({
-if (startAttemptId == attempt && vm.ui.value.starting && !vm.ui.value.running) vm.startFailed("La VPN todavía está iniciándose. Espera un momento y vuelve a comprobar; no se borró tu cuenta ni la configuración.")
-}, 60000)
 }
 }
 private val Bg = Color(0xFF1B1C1F)
@@ -711,7 +720,7 @@ Spacer(Modifier.height(18.dp))
 Text(
 when {
 ui.running -> "Conectado"
-ui.starting -> "Conectando…"
+ui.starting -> "Conectando · toca para cancelar"
 blocked -> st?.message.orEmpty()
 st?.state == "no_servers" -> "Sin servidores disponibles"
 !ui.assetsReady -> "Preparando datos de conexión…"
@@ -935,7 +944,7 @@ Brush.radialGradient(listOf((if (running) Green else Blue).copy(alpha = 0.28f), 
 )
 Box(
 Modifier.size(190.dp).alpha(if (enabled || starting) 1f else 0.4f).tvFocus(CircleShape).clip(CircleShape)
-.background(Card).clickable(enabled = (enabled || starting) && !starting, onClick = onClick),
+.background(Card).clickable(enabled = enabled || starting, onClick = onClick),
 contentAlignment = Alignment.Center
 ) {
 Canvas(Modifier.size(190.dp)) {
