@@ -3,6 +3,7 @@ import android.Manifest
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.IntentFilter
@@ -114,6 +115,7 @@ internal fun shouldSendGzmPing(force: Boolean, hasPending: Boolean, pendingAgeMs
 internal const val GZM_STARTUP_TIMEOUT_MS = 90_000L
 internal fun hasGzmStartupTimedOut(startedAtMs: Long, nowMs: Long): Boolean =
     nowMs - startedAtMs >= GZM_STARTUP_TIMEOUT_MS
+internal fun isGzmConnectionProbeFailure(delayMillis: Long): Boolean = delayMillis < 0L
 
 data class GzmUi(
 val hasToken: Boolean = false,
@@ -171,7 +173,12 @@ val requestId = intent?.getStringExtra(EXTRA_REQUEST_ID).orEmpty()
 val result = intent?.getSerializableExtra("content") as? ConnectionTestResult
 if (requestId == pingPendingId && result != null) {
 pingPendingId = ""
-_ui.update { it.copy(serverPingMs = result.delayMillis.takeIf { ms -> ms >= 0 }) }
+if (isGzmConnectionProbeFailure(result.delayMillis)) {
+GzmDiagnostics.recordMessage(app, "Conexión", "El túnel arrancó, pero la prueba del servidor no respondió: ${result.errorMessage}")
+_ui.update { it.copy(serverPingMs = null, error = "La VPN está activa, pero el servidor no respondió a la prueba. Revisa la red o actualiza los servidores.") }
+} else {
+_ui.update { it.copy(serverPingMs = result.delayMillis, error = if (it.error?.startsWith("La VPN está activa") == true) null else it.error) }
+}
 }
 }
 AppConfig.MSG_MEASURE_DELAY_CANCEL -> {
@@ -187,7 +194,9 @@ _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDo
 }
 AppConfig.MSG_STATE_START_FAILURE -> {
 val detail = intent?.getStringExtra("content")?.trim().orEmpty()
-_ui.update { it.copy(running = false, starting = false, error = detail.ifBlank { "No se pudo conectar. Inténtalo otra vez." }) }
+val safeDetail = detail.ifBlank { "No se pudo conectar. Inténtalo otra vez." }
+GzmDiagnostics.recordMessage(app, "VPN start failure", safeDetail)
+_ui.update { it.copy(running = false, starting = false, error = safeDetail) }
 }
 }
 }
@@ -229,7 +238,11 @@ proxyPass = GzmSettings.proxyPass(),
 )
 }
 private suspend fun prepareGeoAssets(): Boolean = withContext(Dispatchers.IO) {
-GzmGeoAssets.ensure(getApplication<Application>())
+val startedAt = SystemClock.elapsedRealtime()
+val ready = GzmGeoAssets.ensure(getApplication<Application>())
+val elapsed = SystemClock.elapsedRealtime() - startedAt
+if (elapsed >= 5_000L) GzmDiagnostics.recordMessage(getApplication(), "Rendimiento", "Preparar los datos locales de Xray tardó ${elapsed} ms.")
+ready
 }
 private fun reload() {
 // Render the cached account and connection screen immediately. Large Xray geo files and
@@ -243,8 +256,11 @@ it.copy(
 ).let(loadSettings())
 }
 viewModelScope.launch {
+val profileStartedAt = SystemClock.elapsedRealtime()
 withContext(Dispatchers.IO) { GzmSettings.ensureVpnMode() }
 withContext(Dispatchers.IO) { GzmPanel.ensureProfile() }
+val profileElapsed = SystemClock.elapsedRealtime() - profileStartedAt
+if (profileElapsed >= 5_000L) GzmDiagnostics.recordMessage(getApplication(), "Rendimiento", "Recuperar el perfil guardado tardó ${profileElapsed} ms.")
 val assetsReady = prepareGeoAssets()
 _ui.update {
 it.copy(
@@ -274,6 +290,7 @@ viewModelScope.launch {
 delay(GZM_STARTUP_TIMEOUT_MS)
 if (startAttemptId == attempt && _ui.value.starting && hasGzmStartupTimedOut(startedAt, SystemClock.elapsedRealtime())) {
 MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_STATE_STOP, "")
+GzmDiagnostics.recordMessage(getApplication(), "VPN startup timeout", "El túnel no confirmó el inicio en 90 segundos.")
 startFailed("La VPN no logró arrancar en 90 segundos. Se canceló el intento; revisa internet y actualiza los servidores antes de probar otra vez.")
 }
 }
@@ -918,6 +935,26 @@ onClick = { vm.checkUpdate() }, enabled = !ui.updBusy,
 modifier = Modifier.fillMaxWidth().height(48.dp).tvFocus(RoundedCornerShape(14.dp)), shape = RoundedCornerShape(14.dp)
 ) { Text(if (ui.updBusy) "Buscando…" else if (ui.pendingUpdateInstall) "Instalar actualización" else "Buscar actualización") }
 }
+}
+Spacer(Modifier.height(14.dp))
+SectionCard("Diagnóstico") {
+val errors = remember(ui.error) { mutableStateOf(GzmDiagnostics.count(context)) }
+Text("${errors.value} errores de GZMNET guardados en este dispositivo. No se envían solos.", color = Muted, fontSize = 12.sp)
+Spacer(Modifier.height(8.dp))
+Button(
+onClick = {
+val report = GzmDiagnostics.report(context)
+val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+clipboard?.setPrimaryClip(ClipData.newPlainText("Errores de GZMNET", report))
+}, modifier = Modifier.fillMaxWidth().height(46.dp).tvFocus(RoundedCornerShape(14.dp)), shape = RoundedCornerShape(14.dp)
+) { Text("Copiar errores") }
+Spacer(Modifier.height(8.dp))
+OutlinedButton(
+onClick = { context.startActivity(GzmDiagnostics.shareIntent(context)) },
+modifier = Modifier.fillMaxWidth().height(46.dp).tvFocus(RoundedCornerShape(14.dp))
+) { Text("Compartir con el creador") }
+Spacer(Modifier.height(8.dp))
+TextButton(onClick = { GzmDiagnostics.clear(context); errors.value = 0 }) { Text("Borrar registro", color = Muted) }
 }
 Spacer(Modifier.height(20.dp))
 Spacer(Modifier.height(14.dp))

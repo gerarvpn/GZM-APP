@@ -12,6 +12,14 @@ import com.gzmnet.app.handler.SettingsManager
 import com.gzmnet.app.ui.compose.ThemeManager
 
 class AngApplication : Application() {
+    private fun installGzmCrashLogger() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, failure ->
+            runCatching { com.gzmnet.app.gzm.GzmDiagnostics.record(this, "Uncaught app error (${thread.name})", failure) }
+            previous?.uncaughtException(thread, failure)
+        }
+    }
+
     companion object {
         lateinit var application: AngApplication
     }
@@ -34,6 +42,7 @@ class AngApplication : Application() {
      */
     override fun onCreate() {
         super.onCreate()
+        installGzmCrashLogger()
 
         MmkvManager.initialize(this)
 

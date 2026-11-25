@@ -19,6 +19,7 @@ import com.gzmnet.app.handler.AppLocaleManager
 import com.gzmnet.app.handler.MmkvManager
 import com.gzmnet.app.handler.NotificationManager
 import com.gzmnet.app.handler.SettingsManager
+import com.gzmnet.app.gzm.GzmDiagnostics
 import com.gzmnet.app.helper.MessageHelper
 import com.gzmnet.app.util.LogUtil
 import com.gzmnet.app.util.Utils
@@ -130,6 +131,7 @@ class CoreVpnService : VpnService(), ServiceControl {
                 } catch (failure: Throwable) {
                     val detail = failure.message?.take(180).orEmpty()
                     LogUtil.e(AppConfig.TAG, "StartCore-VPN: Core startup threw ${failure.javaClass.simpleName}: $detail", failure)
+                    GzmDiagnostics.record(this, "VPN core startup", failure)
                     stopAllService()
                     MessageHelper.sendMsg2UI(
                         this,
@@ -140,6 +142,7 @@ class CoreVpnService : VpnService(), ServiceControl {
             }
         } catch (failure: Exception) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Unable to queue Xray startup", failure)
+            GzmDiagnostics.record(this, "Queue VPN startup", failure)
             stopAllService()
             MessageHelper.sendMsg2UI(
                 this,
@@ -174,6 +177,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         val prepare = prepare(this)
         if (prepare != null) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Permission not granted")
+            GzmDiagnostics.recordMessage(this, "VPN setup", "Android no concedió el permiso de VPN.")
             MessageHelper.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, "")
             return false
         }
@@ -185,6 +189,7 @@ class CoreVpnService : VpnService(), ServiceControl {
 
         if (!runTun2socks()) {
             LogUtil.e(AppConfig.TAG, "VPN/HEV: tun2socks did not start; refusing to report a connected but non-forwarding VPN")
+            GzmDiagnostics.recordMessage(this, "VPN tunnel setup", "El puente del túnel de tráfico no pudo iniciarse.")
             MessageHelper.sendMsg2UI(
                 this,
                 AppConfig.MSG_STATE_START_FAILURE,
@@ -228,6 +233,7 @@ class CoreVpnService : VpnService(), ServiceControl {
             return true
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to establish VPN interface", e)
+            GzmDiagnostics.record(this, "Establish VPN interface", e)
             stopAllService()
             MessageHelper.sendMsg2UI(this, AppConfig.MSG_STATE_START_FAILURE, "")
         }

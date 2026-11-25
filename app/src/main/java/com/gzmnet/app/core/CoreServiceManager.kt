@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import android.system.OsConstants
 import androidx.core.content.ContextCompat
 import com.gzmnet.app.AppConfig
@@ -24,6 +25,7 @@ import com.gzmnet.app.handler.MmkvManager
 import com.gzmnet.app.handler.NotificationManager
 import com.gzmnet.app.handler.SettingsManager
 import com.gzmnet.app.handler.SpeedtestManager
+import com.gzmnet.app.gzm.GzmDiagnostics
 import com.gzmnet.app.helper.MessageHelper
 import com.gzmnet.app.service.DialerNativeService
 import com.gzmnet.app.service.DialerWebviewService
@@ -43,8 +45,6 @@ import libv2ray.CoreController
 import libv2ray.ProcessFinder
 import java.lang.ref.SoftReference
 import java.net.InetSocketAddress
-
-internal fun isGzmOutboundProbeSuccessful(delayMs: Long): Boolean = delayMs >= 0L
 
 object CoreServiceManager {
 
@@ -108,6 +108,7 @@ object CoreServiceManager {
         } catch (e: Exception) {
             val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: $message", e)
+            GzmDiagnostics.record(service, "Xray startup", e)
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
             NotificationManager.cancelNotification()
             return false
@@ -133,7 +134,12 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
+        val configStartedAt = SystemClock.elapsedRealtime()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
+        val configElapsed = SystemClock.elapsedRealtime() - configStartedAt
+        if (configElapsed >= 5_000L) {
+            GzmDiagnostics.recordMessage(service, "Rendimiento", "Preparar configuración del servidor tardó ${configElapsed} ms.")
+        }
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
@@ -155,34 +161,20 @@ object CoreServiceManager {
         if (dialerAddr.isNotNullEmpty()) {
             CoreNativeManager.reconcileBrowserDialer(dialerAddr)
         }
+        val coreStartedAt = SystemClock.elapsedRealtime()
         coreController.startLoop(result.content, tunFd)
+        val coreElapsed = SystemClock.elapsedRealtime() - coreStartedAt
+        if (coreElapsed >= 5_000L) {
+            GzmDiagnostics.recordMessage(service, "Rendimiento", "Arrancar el motor VPN tardó ${coreElapsed} ms.")
+        }
 
         if (!isRunning()) {
             error("Core failed to start")
         }
 
-        // Do not tell GZMNET that it is connected merely because the native core started.
-        // Probe the selected proxy through Xray itself, with a fallback endpoint, before
-        // acknowledging a first connection. This catches malformed/unreachable server entries.
-        if (!isReload && vpnInterface != null && SettingsManager.isVpnMode()) {
-            var probe = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl()) }
-                .onFailure { failure ->
-                    LogUtil.w(AppConfig.TAG, "StartCore-VPN: initial outbound probe failed (${failure.javaClass.simpleName})")
-                }
-                .getOrDefault(-1L)
-            if (!isGzmOutboundProbeSuccessful(probe)) {
-                probe = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl(true)) }
-                    .onFailure { failure ->
-                        LogUtil.w(AppConfig.TAG, "StartCore-VPN: fallback outbound probe failed (${failure.javaClass.simpleName})")
-                    }
-                    .getOrDefault(-1L)
-            }
-            if (!isGzmOutboundProbeSuccessful(probe)) {
-                LogUtil.e(AppConfig.TAG, "StartCore-VPN: initial outbound probe failed for profile ${guid.take(12)}; both probe endpoints returned no connection")
-                error("Xray inició, pero el servidor seleccionado no respondió a la prueba de conexión. Comprueba internet y actualiza los servidores.")
-            }
-            LogUtil.i(AppConfig.TAG, "StartCore-VPN: selected outbound probe succeeded (${probe} ms)")
-        }
+        // A successful startLoop means the core and TUN are established. Do not block this
+        // callback on an external HTTP latency probe: GZMNET requests that probe asynchronously
+        // after this acknowledgement so the connection button responds as soon as the tunnel starts.
 
         if (browserDialer != null) {
             browserDialer!!.stop()
@@ -370,6 +362,9 @@ object CoreServiceManager {
             }
 
             ensureActive()
+            if (time < 0L) {
+                GzmDiagnostics.recordMessage(service, "Conexión", "La medición de salida del perfil no obtuvo respuesta en los dos destinos de prueba.")
+            }
             val initialResult = ConnectionTestResult(
                 delayMillis = time,
                 errorMessage = errorStr,
