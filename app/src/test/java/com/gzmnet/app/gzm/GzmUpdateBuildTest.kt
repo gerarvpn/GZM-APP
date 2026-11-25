@@ -24,6 +24,13 @@ class GzmUpdateBuildTest {
     }
 
     @Test
+    fun `delete completed update cache only after Android confirms package replacement`() {
+        assertEquals(true, shouldCleanGzmUpdateCacheAfter("android.intent.action.MY_PACKAGE_REPLACED"))
+        assertEquals(false, shouldCleanGzmUpdateCacheAfter("android.intent.action.BOOT_COMPLETED"))
+        assertEquals(false, shouldCleanGzmUpdateCacheAfter(null))
+    }
+
+    @Test
     fun `accepts only zip based apk header`() {
         assertEquals(true, isGzmApkZipHeader(byteArrayOf(0x50, 0x4b, 0x03, 0x04)))
         assertEquals(false, isGzmApkZipHeader("<html".toByteArray()))

@@ -244,6 +244,9 @@ class GzmBootReceiver : BroadcastReceiver() {
         val pr = goAsync()
         thread {
             try {
+                if (shouldCleanGzmUpdateCacheAfter(a)) {
+                    GzmUpdate.cleanupAfterSuccessfulInstall(context.applicationContext)
+                }
                 GzmSettings.initializeAppSettings(context.applicationContext)
                 GzmAuto.apply(context.applicationContext)
                 if (GzmPanel.hasToken()) GzmSyncWorker.schedule(context.applicationContext)
@@ -265,6 +268,9 @@ class GzmBootReceiver : BroadcastReceiver() {
 }
 
 data class GzmRelease(val build: Int, val name: String)
+
+internal fun shouldCleanGzmUpdateCacheAfter(action: String?): Boolean =
+    action == "android.intent.action.MY_PACKAGE_REPLACED"
 
 internal fun parseGzmReleaseBuild(name: String): Int? =
     Regex("""(?i)\bbuild\s+(\d+)\b""").find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
@@ -339,7 +345,9 @@ object GzmUpdate {
         val target = File(context.cacheDir, FILE)
         val partial = File(context.cacheDir, PARTIAL_FILE)
         try {
+            // Keep only the current attempt's partial; clear an older APK before starting a new one.
             partial.delete()
+            target.delete()
             connection = URL("$APK_URL?gzm_build=$id").openConnection() as HttpURLConnection
             connection.connectTimeout = 20000
             connection.readTimeout = 45000
@@ -399,6 +407,17 @@ object GzmUpdate {
     } ?: -1
 
     fun downloadError(id: Long): String? = downloads[id]?.error
+
+    /** Called only after Android confirms GZMNET's package has been replaced. */
+    fun cleanupAfterSuccessfulInstall(context: Context) {
+        runCatching { File(context.applicationContext.cacheDir, FILE).delete() }
+        runCatching { File(context.applicationContext.cacheDir, PARTIAL_FILE).delete() }
+    }
+
+    /** Remove interrupted download remnants, but never delete a completed APK awaiting install. */
+    fun cleanupInterruptedDownload(context: Context) {
+        runCatching { File(context.applicationContext.cacheDir, PARTIAL_FILE).delete() }
+    }
 
     fun canInstall(ctx: Context): Boolean = Build.VERSION.SDK_INT < 26 || ctx.packageManager.canRequestPackageInstalls()
 

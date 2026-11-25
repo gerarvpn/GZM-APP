@@ -573,6 +573,7 @@ if (it.resultCode == RESULT_OK) startVpnNow() else vm.startFailed("Se necesita p
 private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 override fun onCreate(savedInstanceState: Bundle?) {
 super.onCreate(savedInstanceState)
+GzmUpdate.cleanupInterruptedDownload(this)
 window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 val uiMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
 val isTv = packageManager.hasSystemFeature("android.software.leanback") ||

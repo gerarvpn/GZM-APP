@@ -62,6 +62,13 @@ class CoreVpnService : VpnService(), ServiceControl {
 //        super.onLowMemory()
 //    }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Removing GZMNET from Recents closes only its screen; Android's foreground VpnService
+        // must keep routing traffic until the user explicitly presses Disconnect.
+        LogUtil.i(AppConfig.TAG, "StartCore-VPN: app task removed; keeping active VPN service")
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service destroyed")
