@@ -33,5 +33,7 @@ Android exige que las conexiones del propio cliente VPN salgan por la red subyac
 
 - El arranque de Xray se inicia en un hilo de trabajo dedicado para mantener disponible el hilo principal del servicio.
 - La pantalla de inicio se dibuja con el estado guardado mientras se recuperan perfiles y se preparan los datos de Xray en segundo plano; mientras termina, el botón indica que está preparando.
-- En la nueva build deben volver a ejecutarse las pruebas enfocadas de selección de perfil, error temporal del panel, decisión de reutilizar VPN y ping.
+- La búsqueda de actualizaciones consulta el release más reciente de GZM-APP y compara el número de build, manteniendo visible la versión comercial 1.0.
+- Las builds distribuibles se firman con una sola clave privada guardada como secreto del repositorio; el proyecto cambió a un ID de app nuevo porque las vistas previas tenían firmas distintas y Android rechazaba su actualización directa.
+- En la nueva build se ejecutarán pruebas enfocadas de perfiles, actualización, decisión de inicio de VPN y ping, más compilación y verificación de firma.
 - No se probó en un teléfono ni en una TV física; no afirmar que el tráfico ya está arreglado hasta ejecutar las pruebas anteriores.

@@ -247,9 +247,12 @@ class GzmBootReceiver : BroadcastReceiver() {
 
 data class GzmRelease(val build: Int, val name: String)
 
+internal fun parseGzmReleaseBuild(name: String): Int? =
+    Regex("""(?i)\bbuild\s+(\d+)\b""").find(name)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
 /** Actualización desde la propia app, usando el último Release de GitHub. */
 object GzmUpdate {
-    private const val REPO = "gerarvpn/gzmnet-app"
+    private const val REPO = "gerarvpn/GZM-APP"
     const val APK_URL = "https://github.com/$REPO/releases/latest/download/GZMNET.apk"
     private const val FILE = "GZMNET-update.apk"
 
@@ -267,7 +270,7 @@ object GzmUpdate {
             if (c.responseCode != 200) return@withContext null
             val o = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
             val name = o.optString("name")
-            val b = Regex("(\\d+)").findAll(name).lastOrNull()?.value?.toIntOrNull() ?: return@withContext null
+            val b = parseGzmReleaseBuild(name) ?: return@withContext null
             GzmRelease(b, name)
         } catch (e: Exception) {
             null

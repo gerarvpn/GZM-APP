@@ -33,6 +33,20 @@ jobs:
         with:
           packages: 'platforms;android-37.1 build-tools;37.0.0 platform-tools'
 
+      - name: Preparar firma estable para instalaciones y actualizaciones
+        shell: bash
+        env:
+          GZMNET_SIGNING_KEYSTORE_B64: ${{ secrets.GZMNET_SIGNING_KEYSTORE_B64 }}
+          GZMNET_SIGNING_PASSWORD: ${{ secrets.GZMNET_SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$GZMNET_SIGNING_KEYSTORE_B64"
+          test -n "$GZMNET_SIGNING_PASSWORD"
+          store="$RUNNER_TEMP/gzmnet-release.p12"
+          printf '%s' "$GZMNET_SIGNING_KEYSTORE_B64" | base64 --decode > "$store"
+          test -s "$store"
+          echo "GZMNET_SIGNING_STORE=$store" >> "$GITHUB_ENV"
+
       - name: Preparar Xray y datos de reglas
         shell: bash
         run: |
@@ -68,7 +82,7 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
           sed -i "s/versionCode = 760/versionCode = $((1000+${GITHUB_RUN_NUMBER})) /" app/build.gradle.kts
-          ./gradlew :app:testPlaystoreDebugUnitTest --tests 'com.gzmnet.app.gzm.GzmProfileSelectionTest' --tests 'com.gzmnet.app.gzm.GzmPanelOfflineDecisionTest' --tests 'com.gzmnet.app.service.CoreVpnStartDecisionTest' --tests 'com.gzmnet.app.service.RealPingExecutionLimiterTest' --stacktrace
+          ./gradlew :app:testPlaystoreDebugUnitTest --tests 'com.gzmnet.app.gzm.GzmProfileSelectionTest' --tests 'com.gzmnet.app.gzm.GzmPanelOfflineDecisionTest' --tests 'com.gzmnet.app.service.CoreVpnStartDecisionTest' --tests 'com.gzmnet.app.service.RealPingExecutionLimiterTest' --tests 'com.gzmnet.app.gzm.GzmUpdateBuildTest' --stacktrace
           ./gradlew :app:compilePlaystoreDebugKotlin :app:assemblePlaystoreDebug -PABI_FILTERS="arm64-v8a;armeabi-v7a;x86;x86_64" --stacktrace
 
       - name: Preparar instalador universal
@@ -86,5 +100,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          build_number="$((1000 + GITHUB_RUN_NUMBER))"
           tag="gzm-app-${GITHUB_RUN_NUMBER}"
-          gh release create "$tag" out/GZMNET.apk --title "GZMNET build ${GITHUB_RUN_NUMBER}" --notes "Instalador universal para teléfono y Android TV." --latest
+          gh release create "$tag" out/GZMNET.apk --title "GZMNET build ${build_number}" --notes "Instalador universal para teléfono y Android TV. Actualización desde GZMNET: sí." --latest

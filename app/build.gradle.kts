@@ -14,7 +14,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.gzmnet.app"
+        // Bootstrap under a fresh app ID: earlier preview APKs were signed with different
+        // runner-generated debug keys, so Android cannot update those in place. This ID can now
+        // keep one stable signing identity for all future in-app updates.
+        applicationId = "com.gzmnet.gzmapp"
         minSdk = 24
         targetSdk = 37
         versionCode = 760
@@ -42,9 +45,28 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("gzmnetStable") {
+            val storePath = System.getenv("GZMNET_SIGNING_STORE")
+                ?: error("GZMNET_SIGNING_STORE is required for update-compatible APK signing")
+            val password = System.getenv("GZMNET_SIGNING_PASSWORD")
+                ?: error("GZMNET_SIGNING_PASSWORD is required for update-compatible APK signing")
+            storeFile = file(storePath)
+            storeType = "pkcs12"
+            storePassword = password
+            keyAlias = "gzmnet"
+            keyPassword = password
+        }
+    }
+
     buildTypes {
+        debug {
+            // CI debug builds are distributed directly, so they must all share this key.
+            signingConfig = signingConfigs.getByName("gzmnetStable")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("gzmnetStable")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
