@@ -6,6 +6,14 @@ import org.junit.jupiter.api.Test
 
 class GzmUpdateBuildTest {
     @Test
+    fun `saved profile is enough to start without a live panel status request`() {
+        assertEquals(true, canStartFromLocalConfig(hasToken = true, hasConfig = true, assetsReady = true))
+        assertEquals(false, canStartFromLocalConfig(hasToken = true, hasConfig = false, assetsReady = true))
+        assertEquals(false, canStartFromLocalConfig(hasToken = true, hasConfig = true, assetsReady = false))
+        assertEquals(false, canStartFromLocalConfig(hasToken = false, hasConfig = true, assetsReady = true))
+    }
+
+    @Test
     fun `parses numbered GZM release builds without using the visible app version`() {
         assertEquals(1007, parseGzmReleaseBuild("GZMNET build 1007"))
     }

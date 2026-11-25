@@ -27,20 +27,31 @@ import java.lang.ref.SoftReference
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 internal fun shouldReuseEstablishedVpn(coreRunning: Boolean, interfaceReady: Boolean): Boolean =
     coreRunning && interfaceReady
+
+internal fun shouldDeferTunnelClose(coreStartInProgress: Boolean, onCoreStartThread: Boolean): Boolean =
+    coreStartInProgress && !onCoreStartThread
 
 @SuppressLint("VpnServicePolicy")
 class CoreVpnService : VpnService(), ServiceControl {
     private lateinit var mInterface: ParcelFileDescriptor
     private var isRunning = false
+    @Volatile private var interfaceOpen = false
     private var tun2SocksService: Tun2SocksControl? = null
     private val isStartingLock = AtomicBoolean(false)
-    // Starting the native Go/Xray core can take seconds on low-end TVs. Never block the
-    // service main thread: doing so also stalls lifecycle/stop commands and looks like a hang.
+    private val coreStartInProgress = AtomicBoolean(false)
+    private val stopAfterCoreStart = AtomicBoolean(false)
+    private val queuedStop = AtomicBoolean(false)
+    private val coreStartThread = AtomicReference<Thread?>()
+    // Serialize disconnect behind an in-flight native start so Xray cannot observe a closed TUN fd.
     private val coreStartExecutor = Executors.newSingleThreadExecutor(ThreadFactory { task ->
-        Thread(task, "gzm-xray-start").apply { priority = Thread.NORM_PRIORITY }
+        Thread(task, "gzm-xray-start").apply {
+            priority = Thread.NORM_PRIORITY
+            coreStartThread.set(this)
+        }
     })
 
     override fun onCreate() {
@@ -76,16 +87,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         // Ensure VPN interface is properly closed when the service is destroyed without
         // going through stopAllService() (e.g. when killed unexpectedly). isRunning is
         // set to false at the start of stopAllService(), so this guard prevents a double-close.
-        if (isRunning) {
-            try {
-                if (::mInterface.isInitialized) {
-                    mInterface.close()
-                    LogUtil.i(AppConfig.TAG, "StartCore-VPN: VPN interface closed in onDestroy")
-                }
-            } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to close interface in onDestroy", e)
-            }
-        }
+        if (isRunning && !coreStartInProgress.get()) closeVpnInterface("onDestroy")
 
         unlockStart()
         coreStartExecutor.shutdownNow()
@@ -127,26 +129,31 @@ class CoreVpnService : VpnService(), ServiceControl {
     override fun startService() {
         try {
             coreStartExecutor.execute {
+                coreStartInProgress.set(true)
                 try {
-                    if (!::mInterface.isInitialized) {
-                        error("La interfaz VPN no quedó lista.")
+                    if (stopAfterCoreStart.get() || !isRunning || !::mInterface.isInitialized) {
+                        if (!stopAfterCoreStart.get()) stopAllServiceNow()
+                        return@execute
                     }
                     if (!CoreServiceManager.startCoreLoop(mInterface)) {
                         LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
                         GzmDiagnostics.recordMessage(this@CoreVpnService, "Xray startup", "Xray no pudo iniciar el core loop.")
-                        stopAllService()
+                        if (!stopAfterCoreStart.get()) stopAllServiceNow()
                         return@execute
                     }
+                    // A queued explicit stop runs immediately after this task, never during Xray's fd open.
                 } catch (failure: Throwable) {
                     val detail = failure.message?.take(180).orEmpty()
                     LogUtil.e(AppConfig.TAG, "StartCore-VPN: Core startup threw ${failure.javaClass.simpleName}: $detail", failure)
                     GzmDiagnostics.record(this, "VPN core startup", failure)
-                    stopAllService()
+                    if (!stopAfterCoreStart.get()) stopAllServiceNow()
                     MessageHelper.sendMsg2UI(
                         this,
                         AppConfig.MSG_STATE_START_FAILURE,
                         detail.ifBlank { "Xray no pudo iniciar el túnel. Revisa el perfil del servidor e inténtalo otra vez." },
                     )
+                } finally {
+                    coreStartInProgress.set(false)
                 }
             }
         } catch (failure: Exception) {
@@ -224,14 +231,8 @@ class CoreVpnService : VpnService(), ServiceControl {
         // Configure app-specific settings (session name and per-app proxy)
         configurePerAppProxy(builder)
 
-        // Close the old interface since the parameters have been changed
-        try {
-            if (::mInterface.isInitialized) {
-                mInterface.close()
-            }
-        } catch (e: Exception) {
-            LogUtil.w(AppConfig.TAG, "Failed to close old interface", e)
-        }
+        // Close the old interface since the parameters have been changed.
+        closeVpnInterface("before reconfigure")
 
         // Configure platform-specific features
         configurePlatformFeatures(builder)
@@ -239,6 +240,7 @@ class CoreVpnService : VpnService(), ServiceControl {
         // Create a new interface using the builder and save the parameters
         try {
             mInterface = builder.establish()!!
+            interfaceOpen = true
             isRunning = true
             return true
         } catch (e: Exception) {
@@ -350,6 +352,26 @@ class CoreVpnService : VpnService(), ServiceControl {
     }
 
     private fun stopAllService(isForced: Boolean = true) {
+        if (shouldDeferTunnelClose(coreStartInProgress.get(), Thread.currentThread() === coreStartThread.get())) {
+            stopAfterCoreStart.set(true)
+            if (queuedStop.compareAndSet(false, true)) {
+                runCatching {
+                    coreStartExecutor.execute {
+                        queuedStop.set(false)
+                        stopAllServiceNow(isForced)
+                    }
+                }.onFailure {
+                    queuedStop.set(false)
+                    LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to queue safe tunnel shutdown", it)
+                }
+            }
+            return
+        }
+        stopAllServiceNow(isForced)
+    }
+
+    private fun stopAllServiceNow(isForced: Boolean = true) {
+        stopAfterCoreStart.set(false)
 //        val configName = defaultDPreference.getPrefString(PREF_CURR_CONFIG_GUID, "")
 //        val emptyInfo = VpnNetworkInfo()
 //        val info = loadVpnNetworkInfo(configName, emptyInfo)!! + (lastNetworkInfo ?: emptyInfo)
@@ -380,14 +402,19 @@ class CoreVpnService : VpnService(), ServiceControl {
                 LogUtil.w(AppConfig.TAG, "StartCore-VPN: Sleep interrupted", e)
             }
 
-            try {
-                if (::mInterface.isInitialized) {
-                    mInterface.close()
-                    LogUtil.i(AppConfig.TAG, "StartCore-VPN: VPN interface closed")
-                }
-            } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to close interface", e)
-            }
+            closeVpnInterface("disconnect")
+        }
+    }
+
+    @Synchronized
+    private fun closeVpnInterface(reason: String) {
+        if (!interfaceOpen || !::mInterface.isInitialized) return
+        interfaceOpen = false
+        try {
+            mInterface.close()
+            LogUtil.i(AppConfig.TAG, "StartCore-VPN: VPN interface closed ($reason)")
+        } catch (e: Exception) {
+            LogUtil.w(AppConfig.TAG, "StartCore-VPN: VPN interface close skipped ($reason)", e)
         }
     }
 

@@ -145,7 +145,10 @@ val appRateUp: Long = 0,
 val appRateDown: Long = 0,
 val serverPingMs: Long? = null,
 ) {
-val canConnect: Boolean get() = hasToken && hasConfig && assetsReady && (offline || status == null || status.isActive)
+val canConnect: Boolean get() = canStartFromLocalConfig(hasToken, hasConfig, assetsReady)
+
+internal fun canStartFromLocalConfig(hasToken: Boolean, hasConfig: Boolean, assetsReady: Boolean): Boolean =
+    hasToken && hasConfig && assetsReady
 }
 class GzmViewModel(app: Application) : AndroidViewModel(app) {
 private val _ui = MutableStateFlow(GzmUi())
@@ -271,7 +274,9 @@ error = if (assetsReady) it.error else "Faltan los datos de geolocalización de 
 ).let(loadSettings())
 }
 GzmAuto.apply(getApplication())
-if (GzmPanel.hasToken()) refreshLiveStatus()
+// Startup and connection use the encrypted local profile. Status refresh is deferred to
+// the regular background poll; a panel request must never gate the first Connect action.
+_ui.update { it.copy(syncing = false) }
 }
 }
 private fun markRunning() {
@@ -600,7 +605,6 @@ override fun onResume() {
 super.onResume()
 vm.setActivityVisible(true)
 vm.resumePendingUpdateInstall()
-vm.refreshLiveStatus()
 }
 override fun onPause() {
 vm.setActivityVisible(false)

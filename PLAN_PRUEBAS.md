@@ -20,8 +20,8 @@ La compilación y el análisis del código no demuestran que una VPN pase tráfi
 
 ## Panel y persistencia
 
-- Sin Internet al iniciar, comprobar que la configuración guardada no se borra.
-- Con el panel inaccesible, conectar usando el perfil local y comprobar el tráfico de las demás apps.
+- Sin Internet al iniciar, comprobar que la configuración guardada no se borra ni se hace una descarga de servidores antes de conectar.
+- Con el panel inaccesible, iniciar con un perfil local guardado y comprobar que la primera conexión y el tráfico de las demás apps funcionan sin esperar la API.
 - Restaurar Internet, actualizar estado del panel y verificar que la cuenta/consumo se muestran de nuevo.
 - Actualizar manualmente y luego validar la actualización por intervalo.
 
@@ -31,8 +31,8 @@ Android exige que las conexiones del propio cliente VPN salgan por la red subyac
 
 ## Estado de verificación
 
-- El arranque de Xray se inicia en un hilo de trabajo dedicado para mantener disponible el hilo principal del servicio.
-- La pantalla de inicio se dibuja con el estado guardado mientras se recuperan perfiles y se preparan los datos de Xray en segundo plano; mientras termina, el botón indica que está preparando.
+- El arranque de Xray se inicia en un hilo de trabajo dedicado para mantener disponible el hilo principal del servicio. Si llega una orden de desconexión mientras Xray abre el descriptor TUN, el cierre se encola detrás del inicio para evitar la carrera que producía «Already closed».
+- La pantalla de inicio y la conexión usan el estado y perfil cifrado guardados localmente; no hacen consulta al panel para permitir la primera conexión ni al volver a primer plano. Los servidores solo se actualizan al pedirlo manualmente o cuando vence el intervalo configurado. Los datos locales imprescindibles de Xray se preparan en segundo plano.
 - La búsqueda de actualizaciones consulta el release más reciente de GZM-APP y compara el número de build, manteniendo visible la versión comercial 1.0.
 - La descarga del APK se realiza en el proceso de GZMNET, no mediante el UID del DownloadManager del sistema, porque la app está excluida del TUN para que el tráfico de control del núcleo no se reinjecte en la VPN. El archivo se valida como ZIP/APK y se instala desde el almacenamiento privado de caché con FileProvider. Al iniciar nueva descarga se reemplaza solo el APK viejo de actualización; al abrir GZMNET se elimina solo un parcial interrumpido, y el APK completo se elimina tras confirmación de MY_PACKAGE_REPLACED. Perfiles/configuración nunca se borran; hay que probar en el TV la descarga, instalación y continuidad de VPN.
 - El informe de diagnóstico contiene únicamente fallos de la app, Xray, conexión o túnel; se excluyen los registros de rendimiento y se filtran también de los informes antiguos. El contador de arranque basado en tiempo de vida del proceso se retiró porque podía incluir minutos en segundo plano y reportar duraciones falsas.
