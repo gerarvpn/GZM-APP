@@ -98,7 +98,7 @@ jobs:
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging out/GZMNET.apk | grep -m1 '^package:'
           "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging out/GZMNET.apk | grep -m1 '^sdkVersion:'
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose out/GZMNET.apk | tee out/signature-check.txt
-          grep -q 'Verified using v1 scheme (JAR signing): true' out/signature-check.txt
+          grep -Fq "sdkVersion:'24'" <("$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging out/GZMNET.apk)
           grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' out/signature-check.txt
 
       - name: Publicar instalador de prueba

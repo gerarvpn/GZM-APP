@@ -55,8 +55,7 @@ android {
             storeFile = file(storePath)
             storeType = "pkcs12"
             storePassword = password
-            // Keep both JAR/v1 and v2 signatures for broad Android package-installer support.
-            enableV1Signing = true
+            // Xray requires API 24+; Android 7's package installer supports v2 signatures.
             enableV2Signing = true
             keyAlias = "gzmnet"
             keyPassword = password
