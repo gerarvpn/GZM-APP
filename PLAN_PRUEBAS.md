@@ -20,7 +20,8 @@ La compilación y el análisis del código no demuestran que una VPN pase tráfi
 
 ## Panel y persistencia
 
-- Reiniciar completamente el teléfono/TV, abrir GZMNET y comprobar que recupera el perfil seleccionado desde la copia cifrada local sin pulsar Actualizar servidores.
+- Reiniciar completamente el teléfono/TV, abrir GZMNET y comprobar que recupera el perfil seleccionado desde la copia cifrada local sin pulsar Actualizar servidores. La pérdida del marcador de última sincronización no debe convertir un perfil local existente en una sincronización forzada.
+- Verificar que BOOT_COMPLETED no descarga la lista legacy de suscripciones: el arranque usa la configuración local, y solo Actualizar servidores o el intervalo GZM pueden refrescarla.
 - Con perfil guardado y estado de cuenta cacheado como antiguo/inactivo, comprobar que la conexión local arranca de inmediato; si el panel informa después que la cuenta está realmente desactivada, debe detenerla.
 - Sin Internet al iniciar, comprobar que la configuración guardada no se borra ni se hace una descarga de servidores antes de conectar.
 - Con el panel inaccesible, iniciar con un perfil local guardado y comprobar que la primera conexión y el tráfico de las demás apps funcionan sin esperar la API.

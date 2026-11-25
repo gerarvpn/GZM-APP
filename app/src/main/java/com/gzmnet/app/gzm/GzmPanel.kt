@@ -21,6 +21,12 @@ import javax.crypto.spec.SecretKeySpec
 internal fun shouldRestoreGzmProfile(hasUsableSelectedProfile: Boolean, hasEncryptedConfigSnapshot: Boolean): Boolean =
     !hasUsableSelectedProfile && hasEncryptedConfigSnapshot
 
+internal fun isGzmConfigRefreshDue(lastSyncAt: Long, now: Long, intervalHours: Int, hasSavedConfig: Boolean): Boolean {
+    if (lastSyncAt <= 0L) return !hasSavedConfig
+    val intervalMs = intervalHours.coerceIn(1, 1440) * 60L * 60L * 1000L
+    return now - lastSyncAt >= intervalMs
+}
+
 data class GzmToken(val baseUrl: String, val sub: String)
 
 data class GzmStatus(
@@ -96,11 +102,13 @@ object GzmPanel {
     private fun saveStatus(s: GzmStatus) = GzmCrypto.writeSecure(F_STATUS, s.toJson().toByteArray())
     fun hasConfig(): Boolean = GzmCrypto.readSecure(F_CONFIG) != null
     fun lastConfigSyncAt(): Long = GzmCrypto.readSecure(F_CONFIG_SYNCED)?.let { String(it).toLongOrNull() } ?: 0L
-    fun configRefreshDue(intervalHours: Int = loadStatus()?.configIntervalHours ?: 12): Boolean {
-        val intervalMs = intervalHours.coerceIn(1, 1440) * 60L * 60L * 1000L
-        val last = lastConfigSyncAt()
-        return last <= 0L || System.currentTimeMillis() - last >= intervalMs
-    }
+    fun configRefreshDue(intervalHours: Int = loadStatus()?.configIntervalHours ?: 12): Boolean =
+        isGzmConfigRefreshDue(
+            lastSyncAt = lastConfigSyncAt(),
+            now = System.currentTimeMillis(),
+            intervalHours = intervalHours,
+            hasSavedConfig = hasConfig(),
+        )
 
     fun clearAll(ctx: Context) {
         LauncherManager.stopService(ctx)

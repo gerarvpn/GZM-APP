@@ -6,6 +6,20 @@ import org.junit.jupiter.api.Test
 
 class GzmProfileSelectionTest {
     @Test
+    fun `saved config with a missing sync timestamp does not trigger a download on boot`() {
+        assertEquals(false, isGzmConfigRefreshDue(lastSyncAt = 0L, now = 1_000_000L, intervalHours = 12, hasSavedConfig = true))
+        assertEquals(true, isGzmConfigRefreshDue(lastSyncAt = 0L, now = 1_000_000L, intervalHours = 12, hasSavedConfig = false))
+    }
+
+    @Test
+    fun `refresh saved config only when its configured interval has elapsed`() {
+        val last = 1_000_000L
+        val interval = 12 * 60 * 60 * 1000L
+        assertEquals(false, isGzmConfigRefreshDue(last, last + interval - 1, 12, true))
+        assertEquals(true, isGzmConfigRefreshDue(last, last + interval, 12, true))
+    }
+
+    @Test
     fun `rebuild a missing selected profile from the encrypted local snapshot`() {
         assertEquals(true, shouldRestoreGzmProfile(hasUsableSelectedProfile = false, hasEncryptedConfigSnapshot = true))
         assertEquals(false, shouldRestoreGzmProfile(hasUsableSelectedProfile = true, hasEncryptedConfigSnapshot = true))
