@@ -1,0 +1,36 @@
+# Plan de pruebas de GZM-APP
+
+La compilación y el análisis del código no demuestran que una VPN pase tráfico. Antes de sustituir o borrar la instalación anterior, probar en un teléfono Android y en una TV Android real.
+
+## Arranque y estabilidad
+
+- Instalación limpia y primera conexión en Wi-Fi.
+- Cierre forzado, reapertura y conexión en un solo intento.
+- Envío de dos órdenes de inicio consecutivas: debe quedar un solo núcleo y una sola interfaz VPN.
+- Cambio Wi-Fi → datos móviles y datos móviles → Wi-Fi con sesión activa.
+- Revocar el permiso VPN y verificar que la app muestra un error claro, no un estado indefinido de “Conectando”.
+
+## Tráfico y DNS
+
+- Con la VPN conectada, abrir varios sitios y una app de streaming; comprobar carga real, no solo el icono del sistema.
+- Verificar que IPv4, IPv6 cuando lo ofrezca la red y DNS resuelven nombres.
+- Comparar IP pública antes y durante la conexión desde otra app.
+- Confirmar que los contadores de subida y bajada aumentan mientras se genera tráfico.
+- Repetir en Wi-Fi, datos móviles y redes IPv6/NAT64.
+
+## Panel y persistencia
+
+- Sin Internet al iniciar, comprobar que la configuración guardada no se borra.
+- Con el panel inaccesible, conectar usando el perfil local y comprobar el tráfico de las demás apps.
+- Restaurar Internet, actualizar estado del panel y verificar que la cuenta/consumo se muestran de nuevo.
+- Actualizar manualmente y luego validar la actualización por intervalo.
+
+## Decisión de encaminamiento Android
+
+Android exige que las conexiones del propio cliente VPN salgan por la red subyacente para que el núcleo no reinyecte sus propias conexiones en el mismo TUN. La versión embebida del motor permite pasar el descriptor TUN y consultar propietarios de sockets, pero no ofrece un callback de protección de sockets. Por eso el proyecto excluye el UID de GZMNET del túnel y enruta las demás apps del dispositivo. Para incluir también la app GZMNET sería necesario añadir y probar una integración explícita de protección de sockets en el motor nativo.
+
+## Estado de verificación
+
+- Proyecto fuente transformado y revisado estáticamente; todavía falta compilar el proyecto nuevo.
+- No se ejecutaron pruebas de unidad ni compilación local: el entorno no tiene Java/Android SDK.
+- No se probó en un teléfono ni en una TV física; no afirmar que el tráfico ya está arreglado hasta ejecutar las pruebas anteriores.

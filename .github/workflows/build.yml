@@ -1,0 +1,89 @@
+name: Compilar GZMNET
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener el proyecto
+        uses: actions/checkout@v4
+
+      - name: Preparar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Preparar Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-37.1 build-tools;37.0.0 platform-tools'
+
+      - name: Preparar Xray y datos de reglas
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/libs
+          curl -fL --retry 3 https://github.com/2dust/AndroidLibXrayLite/releases/download/v26.11.9/libv2ray.aar -o app/libs/libv2ray.aar
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('app/libs/libv2ray.aar') as aar:
+              names = set(aar.namelist())
+              required = {'jni/arm64-v8a/libgojni.so', 'jni/armeabi-v7a/libgojni.so', 'jni/x86/libgojni.so', 'jni/x86_64/libgojni.so', 'classes.jar'}
+              missing = required - names
+              if missing:
+                  raise SystemExit(f'Falta contenido requerido del motor Xray: {sorted(missing)}')
+          PY
+          test -s app/libs/libv2ray.aar
+          ASSET_DIR="$GITHUB_WORKSPACE/app/src/main/assets"
+          mkdir -p "$ASSET_DIR"
+          GEO_BASE="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download"
+          for asset in geosite.dat geoip.dat; do
+            curl -fL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 180 "$GEO_BASE/$asset" -o "$ASSET_DIR/$asset"
+            curl -fL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 60 "$GEO_BASE/$asset.sha256sum" -o "$RUNNER_TEMP/$asset.sha256sum"
+            expected="$(awk 'NR==1 {print $1}' "$RUNNER_TEMP/$asset.sha256sum")"
+            [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]]
+            printf '%s  %s\n' "$expected" "$ASSET_DIR/$asset" | sha256sum --check --status
+            test "$(stat -c %s "$ASSET_DIR/$asset")" -gt 1000000
+          done
+
+      - name: Probar y compilar
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          sed -i "s/versionCode = 760/versionCode = $((1000+${GITHUB_RUN_NUMBER})) /" app/build.gradle.kts
+          ./gradlew :app:testPlaystoreDebugUnitTest :app:compilePlaystoreDebugKotlin :app:assemblePlaystoreDebug -PABI_FILTERS="arm64-v8a;armeabi-v7a;x86;x86_64" --stacktrace
+
+      - name: Preparar instalador universal
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          apk=$(find app/build/outputs/apk/playstore/debug -type f -name '*universal*.apk' -print -quit)
+          test -n "$apk"
+          cp "$apk" out/GZMNET.apk
+          "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging out/GZMNET.apk | grep -m1 -E 'package:|application-label:'
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose out/GZMNET.apk
+
+      - name: Publicar instalador de prueba
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="gzm-app-${GITHUB_RUN_NUMBER}"
+          gh release create "$tag" out/GZMNET.apk --title "GZMNET build ${GITHUB_RUN_NUMBER}" --notes "Instalador universal para teléfono y Android TV." --latest
