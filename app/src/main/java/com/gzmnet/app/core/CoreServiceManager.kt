@@ -137,7 +137,7 @@ object CoreServiceManager {
         val configStartedAt = SystemClock.elapsedRealtime()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
         val configElapsed = SystemClock.elapsedRealtime() - configStartedAt
-        if (configElapsed >= 5_000L) {
+        if (configElapsed >= 1_000L) {
             GzmDiagnostics.recordMessage(service, "Rendimiento", "Preparar configuración del servidor tardó ${configElapsed} ms.")
         }
         LogUtil.d(AppConfig.TAG, result.content)
@@ -164,7 +164,7 @@ object CoreServiceManager {
         val coreStartedAt = SystemClock.elapsedRealtime()
         coreController.startLoop(result.content, tunFd)
         val coreElapsed = SystemClock.elapsedRealtime() - coreStartedAt
-        if (coreElapsed >= 5_000L) {
+        if (coreElapsed >= 1_000L) {
             GzmDiagnostics.recordMessage(service, "Rendimiento", "Arrancar el motor VPN tardó ${coreElapsed} ms.")
         }
 

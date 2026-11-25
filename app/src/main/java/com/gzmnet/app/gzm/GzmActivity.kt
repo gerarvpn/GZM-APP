@@ -154,6 +154,7 @@ private var downloadId = -1L
 private var pendingInstallId = -1L
 private var installLaunchInProgress = false
 @Volatile private var startAttemptId = 0L
+@Volatile private var startAttemptStartedAt = 0L
 private val panelSyncMutex = Mutex()
 @Volatile private var lastConfigAttemptAt = 0L
 @Volatile private var panelFailureCount = 0
@@ -275,6 +276,9 @@ if (GzmPanel.hasToken()) refreshLiveStatus()
 }
 }
 private fun markRunning() {
+val elapsed = startAttemptStartedAt.takeIf { it > 0L }?.let { (SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
+if (elapsed != null) GzmDiagnostics.recordMessage(getApplication(), "Rendimiento", "La VPN confirmó conexión en ${elapsed} ms desde que se tocó conectar.")
+startAttemptStartedAt = 0L
 startAttemptId++
 GzmPanel.setReconnectAfterUpdate(true)
 _ui.update { it.copy(running = true, starting = false, error = null) }
@@ -286,6 +290,7 @@ requestServerPingIfDue(force = true)
 fun beginStart() {
 val attempt = ++startAttemptId
 val startedAt = SystemClock.elapsedRealtime()
+startAttemptStartedAt = startedAt
 _ui.update { it.copy(starting = true, running = false, error = null) }
 viewModelScope.launch {
 delay(GZM_STARTUP_TIMEOUT_MS)
@@ -296,9 +301,16 @@ startFailed("La VPN no logró arrancar en 90 segundos. Se canceló el intento; r
 }
 }
 }
-fun startFailed(message: String) { startAttemptId++; GzmPanel.setReconnectAfterUpdate(false); _ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDown = 0, error = message) } }
+fun startFailed(message: String) {
+val startedAt = startAttemptStartedAt
+if (startedAt > 0L) GzmDiagnostics.recordMessage(getApplication(), "VPN start failure", "El intento de conexión terminó tras ${SystemClock.elapsedRealtime() - startedAt} ms: $message")
+startAttemptStartedAt = 0L
+startAttemptId++
+GzmPanel.setReconnectAfterUpdate(false)
+_ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDown = 0, error = message) }
+}
 fun stopRequested() { startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
-fun stopFallback() { startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
+fun stopFallback() { startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
 fun refresh() {
 if (!GzmPanel.hasToken()) return
 viewModelScope.launch {
