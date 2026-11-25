@@ -146,10 +146,11 @@ val appRateDown: Long = 0,
 val serverPingMs: Long? = null,
 ) {
 val canConnect: Boolean get() = canStartFromLocalConfig(hasToken, hasConfig, assetsReady)
+}
 
 internal fun canStartFromLocalConfig(hasToken: Boolean, hasConfig: Boolean, assetsReady: Boolean): Boolean =
     hasToken && hasConfig && assetsReady
-}
+
 class GzmViewModel(app: Application) : AndroidViewModel(app) {
 private val _ui = MutableStateFlow(GzmUi())
 val ui: StateFlow<GzmUi> = _ui.asStateFlow()
