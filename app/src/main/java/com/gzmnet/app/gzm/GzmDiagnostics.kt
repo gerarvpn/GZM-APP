@@ -72,9 +72,10 @@ object GzmDiagnostics {
 
     internal fun redact(input: String): String {
         var text = input.replace(Regex("(?i)\\bGZM(?:1|2)?\\.[A-Za-z0-9_-]+"), "GZM.[REDACTED]")
-        text = text.replace(Regex("(?i)\\b(token|password|passwd|secret|authorization|api[_-]?key)\\s*[:=]\\s*[^\\s,;]+"), "$1=[REDACTED]")
-        text = text.replace(Regex("(?i)([a-z][a-z0-9+.-]*://)[^/@\\s]+@"), "$1[REDACTED]@")
+        text = text.replace(Regex("(?i)\\b(token|password|passwd|secret|authorization|api[_-]?key|uuid|private[_-]?key)\\s*[:=]\\s*[^\\s,;]+"), "$1=[REDACTED]")
+        text = text.replace(Regex("(?i)(\"(?:token|password|passwd|secret|authorization|api[_-]?key|uuid|private[_-]?key)\"\\s*:\\s*\")[^\"]*(\")"), "$1[REDACTED]$2")
         text = text.replace(Regex("(?i)\\b(vless|vmess|trojan|ss|ssr|hysteria2?|tuic|wireguard)://\\S+"), "[SERVER_CONFIG_REDACTED]")
+        text = text.replace(Regex("(?i)https?://\\S+"), "[URL_REDACTED]")
         return text.replace(Regex("[\\r\\n\\t]+"), " ").take(300)
     }
 }

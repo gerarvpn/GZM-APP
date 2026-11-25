@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -569,11 +570,16 @@ controller.hide(WindowInsetsCompat.Type.systemBars())
 controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 }
 }
-if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-if (GzmPanel.hasToken()) GzmSyncWorker.schedule(this)
 connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 runCatching { connectivityManager?.registerDefaultNetworkCallback(networkCallback) }
 setContent { GzmApp(vm, ::toggle, isTv) }
+// Defer non-visual startup work until after the first frame, and capture cold-start slowness.
+window.decorView.post {
+val coldStartMs = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
+if (coldStartMs >= 2_500L) GzmDiagnostics.recordMessage(this, "Rendimiento", "La app tardó ${coldStartMs} ms en mostrar su pantalla inicial.")
+if (Build.VERSION.SDK_INT >= 33) runCatching { notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+if (GzmPanel.hasToken()) runCatching { GzmSyncWorker.schedule(this) }
+}
 }
 override fun onResume() {
 super.onResume()

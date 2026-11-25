@@ -13,9 +13,10 @@ class GzmDiagnosticsRedactionTest {
         assertTrue(safe.contains("GZM.[REDACTED]"))
         assertTrue(safe.contains("token=[REDACTED]"))
         assertTrue(safe.contains("[SERVER_CONFIG_REDACTED]"))
-        assertTrue(safe.contains("https://[REDACTED]@"))
+        assertTrue(safe.contains("[URL_REDACTED]"))
         assertFalse(safe.contains("abc_DEF"))
         assertFalse(safe.contains("user:pass"))
         assertFalse(safe.contains("name:pass"))
+        assertFalse(safe.contains("example.com"))
     }
 }
