@@ -44,6 +44,8 @@ import libv2ray.ProcessFinder
 import java.lang.ref.SoftReference
 import java.net.InetSocketAddress
 
+internal fun isGzmOutboundProbeSuccessful(delayMs: Long): Boolean = delayMs >= 0L
+
 object CoreServiceManager {
 
     private val coreController: CoreController = CoreNativeManager.newCoreController(CoreCallback())
@@ -157,6 +159,29 @@ object CoreServiceManager {
 
         if (!isRunning()) {
             error("Core failed to start")
+        }
+
+        // Do not tell GZMNET that it is connected merely because the native core started.
+        // Probe the selected proxy through Xray itself, with a fallback endpoint, before
+        // acknowledging a first connection. This catches malformed/unreachable server entries.
+        if (!isReload && vpnInterface != null && SettingsManager.isVpnMode()) {
+            var probe = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl()) }
+                .onFailure { failure ->
+                    LogUtil.w(AppConfig.TAG, "StartCore-VPN: initial outbound probe failed (${failure.javaClass.simpleName})")
+                }
+                .getOrDefault(-1L)
+            if (!isGzmOutboundProbeSuccessful(probe)) {
+                probe = runCatching { coreController.measureDelay(SettingsManager.getDelayTestUrl(true)) }
+                    .onFailure { failure ->
+                        LogUtil.w(AppConfig.TAG, "StartCore-VPN: fallback outbound probe failed (${failure.javaClass.simpleName})")
+                    }
+                    .getOrDefault(-1L)
+            }
+            if (!isGzmOutboundProbeSuccessful(probe)) {
+                LogUtil.e(AppConfig.TAG, "StartCore-VPN: initial outbound probe failed for profile ${guid.take(12)}; both probe endpoints returned no connection")
+                error("Xray inició, pero el servidor seleccionado no respondió a la prueba de conexión. Comprueba internet y actualiza los servidores.")
+            }
+            LogUtil.i(AppConfig.TAG, "StartCore-VPN: selected outbound probe succeeded (${probe} ms)")
         }
 
         if (browserDialer != null) {

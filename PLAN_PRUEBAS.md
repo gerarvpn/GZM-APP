@@ -35,6 +35,9 @@ Android exige que las conexiones del propio cliente VPN salgan por la red subyac
 - La pantalla de inicio se dibuja con el estado guardado mientras se recuperan perfiles y se preparan los datos de Xray en segundo plano; mientras termina, el botón indica que está preparando.
 - La búsqueda de actualizaciones consulta el release más reciente de GZM-APP y compara el número de build, manteniendo visible la versión comercial 1.0.
 - Las builds distribuibles se firman con una sola clave privada guardada como secreto del repositorio; el proyecto cambió a un ID de app nuevo porque las vistas previas tenían firmas distintas y Android rechazaba su actualización directa.
-- El APK universal incluye firma v1 y v2. La librería Android de Xray exige Android 7/API 24 como mínimo; el intento de bajarlo a Android 6/API 23 falla en la verificación real del manifest y no se forzó.
-- En la siguiente build se ejecutarán pruebas enfocadas de perfiles, actualización, decisión de inicio de VPN y ping, más compilación y verificación de ambas firmas.
+- El APK universal está firmado con el esquema v2 y requiere Android 7/API 24, mínimo que exige la librería Android de Xray.
+- GZMNET no marca conectado solo porque arrancó el proceso: el inicio del modo VPN hace una prueba de salida por Xray a dos destinos alternativos. Si ninguno responde, informa el problema y no presenta el túnel como funcional.
+- La interfaz cancela y muestra un error si el inicio queda pendiente por más de 90 segundos; callbacks tardíos de un intento cancelado no deben cambiar la pantalla a conectado.
+- La siguiente build incluirá pruebas JVM de la validación de salida y del límite de espera, además de compilación y verificación de APK.
+- No se ha probado esta corrección en una TV física; por ahora es una mejora validada por compilación y pruebas automatizadas.
 - No se probó en un teléfono ni en una TV física; no afirmar que el tráfico ya está arreglado hasta ejecutar las pruebas anteriores.

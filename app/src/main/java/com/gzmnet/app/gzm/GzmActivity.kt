@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -110,6 +111,10 @@ internal fun isPanelOfflineAfterFailures(failures: Int): Boolean = failures >= 2
 internal fun shouldSendGzmPing(force: Boolean, hasPending: Boolean, pendingAgeMs: Long, sinceLastRequestMs: Long): Boolean =
     (force || !hasPending || pendingAgeMs >= 25_000L) && (force || sinceLastRequestMs >= 10_000L)
 
+internal const val GZM_STARTUP_TIMEOUT_MS = 90_000L
+internal fun hasGzmStartupTimedOut(startedAtMs: Long, nowMs: Long): Boolean =
+    nowMs - startedAtMs >= GZM_STARTUP_TIMEOUT_MS
+
 data class GzmUi(
 val hasToken: Boolean = false,
 val status: GzmStatus? = null,
@@ -145,6 +150,7 @@ val ui: StateFlow<GzmUi> = _ui.asStateFlow()
 private var downloadId = -1L
 private var pendingInstallId = -1L
 private var installLaunchInProgress = false
+@Volatile private var startAttemptId = 0L
 private val panelSyncMutex = Mutex()
 @Volatile private var lastConfigAttemptAt = 0L
 @Volatile private var panelFailureCount = 0
@@ -171,13 +177,10 @@ _ui.update { it.copy(serverPingMs = result.delayMillis.takeIf { ms -> ms >= 0 })
 AppConfig.MSG_MEASURE_DELAY_CANCEL -> {
 if (intent?.getStringExtra(EXTRA_REQUEST_ID).orEmpty() == pingPendingId) pingPendingId = ""
 }
-AppConfig.MSG_STATE_RUNNING, AppConfig.MSG_STATE_START_SUCCESS -> {
-GzmPanel.setReconnectAfterUpdate(true)
-_ui.update { it.copy(running = true, starting = false, error = null) }
-if (activityVisible) {
-MessageHelper.sendMsg2Service(app, AppConfig.MSG_GZM_TRAFFIC_START, "")
-requestServerPingIfDue(force = true)
-}
+AppConfig.MSG_STATE_RUNNING -> markRunning()
+AppConfig.MSG_STATE_START_SUCCESS -> {
+// Ignore a late startup callback after the user cancelled or the startup watchdog expired.
+if (_ui.value.starting) markRunning()
 }
 AppConfig.MSG_STATE_NOT_RUNNING, AppConfig.MSG_STATE_STOP_SUCCESS -> {
 _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) }
@@ -254,10 +257,30 @@ GzmAuto.apply(getApplication())
 if (GzmPanel.hasToken()) refreshLiveStatus()
 }
 }
-fun beginStart() { _ui.update { it.copy(starting = true, error = null) } }
-fun startFailed(message: String) { GzmPanel.setReconnectAfterUpdate(false); _ui.update { it.copy(starting = false, running = false, error = message) } }
-fun stopRequested() { _ui.update { it.copy(starting = true, error = null) } }
-fun stopFallback() { _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
+private fun markRunning() {
+startAttemptId++
+GzmPanel.setReconnectAfterUpdate(true)
+_ui.update { it.copy(running = true, starting = false, error = null) }
+if (activityVisible) {
+MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_START, "")
+requestServerPingIfDue(force = true)
+}
+}
+fun beginStart() {
+val attempt = ++startAttemptId
+val startedAt = SystemClock.elapsedRealtime()
+_ui.update { it.copy(starting = true, running = false, error = null) }
+viewModelScope.launch {
+delay(GZM_STARTUP_TIMEOUT_MS)
+if (startAttemptId == attempt && _ui.value.starting && hasGzmStartupTimedOut(startedAt, SystemClock.elapsedRealtime())) {
+MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_STATE_STOP, "")
+startFailed("La VPN no logró arrancar en 90 segundos. Se canceló el intento; revisa internet y actualiza los servidores antes de probar otra vez.")
+}
+}
+}
+fun startFailed(message: String) { startAttemptId++; GzmPanel.setReconnectAfterUpdate(false); _ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDown = 0, error = message) } }
+fun stopRequested() { startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
+fun stopFallback() { startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
 fun refresh() {
 if (!GzmPanel.hasToken()) return
 viewModelScope.launch {
