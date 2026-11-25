@@ -192,9 +192,9 @@ object GzmPanel {
         if (count <= 0) return false
         val current = MmkvManager.getSelectServer()
         val available = MmkvManager.decodeServerList(AppConfig.DEFAULT_SUBSCRIPTION_ID)
-        val selected = current?.takeIf { it in available && MmkvManager.decodeServerConfig(it) != null }
-            ?: available.firstOrNull { MmkvManager.decodeServerConfig(it) != null }
-            ?: return false
+        val selected = selectUsableGzmProfile(current, available) {
+            MmkvManager.decodeServerConfig(it) != null
+        } ?: return false
         if (selected != current) MmkvManager.setSelectServer(selected)
         return MmkvManager.decodeServerConfig(selected) != null
     }
@@ -203,8 +203,9 @@ object GzmPanel {
     fun ensureProfile() {
         val available = MmkvManager.decodeServerList(AppConfig.DEFAULT_SUBSCRIPTION_ID)
         val current = MmkvManager.getSelectServer()
-        val selected = current?.takeIf { it in available && MmkvManager.decodeServerConfig(it) != null }
-            ?: available.firstOrNull { MmkvManager.decodeServerConfig(it) != null }
+        val selected = selectUsableGzmProfile(current, available) {
+            MmkvManager.decodeServerConfig(it) != null
+        }
         if (selected != null) {
             if (selected != current) MmkvManager.setSelectServer(selected)
             return
