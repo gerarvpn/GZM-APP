@@ -1,0 +1,101 @@
+name: Build GZMNET APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+        fetch-depth: '0'
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        packages: 'platforms;android-37.1 build-tools;37.0.0 platform-tools'
+
+    - name: Install NDK
+      run: |
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;30.0.16248370"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> $GITHUB_ENV
+
+    - name: Build libhevtun
+      run: |
+        sed -i 's/^ABIS=.*/ABIS="arm64-v8a armeabi-v7a"/' compile-hevtun.sh
+        bash compile-hevtun.sh
+
+    - name: Copy libhevtun
+      run: cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+    - name: Download libv2ray
+      run: |
+        pushd AndroidLibXrayLite
+        TAG=$(git describe --tags --abbrev=0)
+        popd
+        mkdir -p V2rayNG/app/libs
+        curl -fL -o V2rayNG/app/libs/libv2ray.aar "https://github.com/2dust/AndroidLibXrayLite/releases/download/$TAG/libv2ray.aar"
+        ls -la V2rayNG/app/libs
+
+    - name: Decode Keystore
+      run: echo "${{ secrets.APP_KEYSTORE_BASE64 }}" | base64 -d > $RUNNER_TEMP/gzm.p12
+
+    - name: Set version
+      run: |
+        sed -i "s/versionCode = 760/versionCode = $((1000+${{ github.run_number }}))/" V2rayNG/app/build.gradle.kts
+
+    - name: Bundle verified Xray geodata
+      run: |
+        set -euo pipefail
+        ASSET_DIR="${{ github.workspace }}/V2rayNG/app/src/main/assets"
+        mkdir -p "$ASSET_DIR"
+        GEO_BASE="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download"
+        for asset in geosite.dat geoip.dat; do
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 180 "$GEO_BASE/$asset" -o "$ASSET_DIR/$asset"
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 60 "$GEO_BASE/$asset.sha256sum" -o "$RUNNER_TEMP/$asset.sha256sum"
+          expected="$(awk 'NR==1 {print $1}' "$RUNNER_TEMP/$asset.sha256sum")"
+          [[ "$expected" =~ ^[a-fA-F0-9]{64}$ ]]
+          printf '%s  %s\n' "$expected" "$ASSET_DIR/$asset" | sha256sum --check --status
+          test "$(stat -c %s "$ASSET_DIR/$asset")" -gt 1000000
+        done
+        ls -lh "$ASSET_DIR/geosite.dat" "$ASSET_DIR/geoip.dat"
+
+    - name: Build APK
+      run: |
+        cd V2rayNG
+        echo "sdk.dir=${ANDROID_HOME}" > local.properties
+        chmod 755 gradlew
+        ./gradlew assemblePlaystoreRelease -PABI_FILTERS="arm64-v8a;armeabi-v7a" --stacktrace \
+          -Pandroid.injected.signing.store.file=$RUNNER_TEMP/gzm.p12 \
+          -Pandroid.injected.signing.store.password='${{ secrets.APP_KEYSTORE_PASSWORD }}' \
+          -Pandroid.injected.signing.key.alias='${{ secrets.APP_KEYSTORE_ALIAS }}' \
+          -Pandroid.injected.signing.key.password='${{ secrets.APP_KEY_PASSWORD }}'
+
+    - name: Publish release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p out
+        APK=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*universal*.apk | head -1)
+        ARM64=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*arm64-v8a*.apk | head -1)
+        ARM32=$(ls V2rayNG/app/build/outputs/apk/playstore/release/*armeabi-v7a*.apk | head -1)
+        cp "$APK" out/GZMNET.apk
+        cp "$ARM64" out/GZMNET-arm64.apk
+        cp "$ARM32" out/GZMNET-arm32.apk
+        "$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging out/GZMNET.apk | grep -m1 -E "package:|application-label:"
+        "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose out/GZMNET.apk
+        BUILD_CODE=$((1000+${{ github.run_number }}))
+        gh release delete latest --yes --cleanup-tag || true
+        gh release create latest out/GZMNET.apk out/GZMNET-arm64.apk out/GZMNET-arm32.apk --title "GZMNET 1.0 (build $BUILD_CODE)" --notes "GZMNET Android · versión 1.0 · build $BUILD_CODE" --latest

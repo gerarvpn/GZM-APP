@@ -1,0 +1,520 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name" translatable="false">GZMNET</string>
+    <string name="app_widget_name">Cambiar</string>
+    <string name="app_tile_name">Cambiar</string>
+    <string name="app_tile_first_use">Agregue un perfil en la aplicación antes de usar esta función.</string>
+    <string name="navigation_drawer_open">Abrir cajón de navegación</string>
+    <string name="navigation_drawer_close">Cerrar cajón de navegación</string>
+    <string name="migration_success">¡La migración de datos se realizó correctamente!</string>
+    <string name="action_stop_service">Detener servicio</string>
+    <string name="action_ok">OK</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="migration_fail">¡Error en la migración de datos!</string>
+    <string name="pull_down_to_refresh">¡Deslice hacia abajo para actualizar!</string>
+    <string name="notification_channel_service">Servicio de GZMNET</string>
+    <string name="notification_channel_subscription_updates">Actualizaciones de suscripción</string>
+    <string name="notification_channel_connection_checks">Comprobaciones de conexión</string>
+    <string name="notification_action_stop_v2ray">Detener</string>
+    <string name="toast_permission_denied">Permiso denegado</string>
+    <string name="toast_permission_denied_notification">Permiso de notificación denegado</string>
+    <string name="notification_action_more">Toca para obtener más</string>
+    <string name="toast_services_start">Iniciando servicio</string>
+    <string name="toast_services_stop">Deteniendo el servicio</string>
+    <string name="toast_services_success">El servicio se inició correctamente</string>
+    <string name="toast_services_failure">Error al iniciar el servicio</string>
+    <string name="title_server">Config</string>
+    <string name="menu_item_add_config">Agregar configuración</string>
+    <string name="menu_item_save_config">Guardar configuración</string>
+    <string name="menu_item_edit_config">Editar configuración</string>
+    <string name="menu_item_del_config">Eliminar configuración</string>
+    <string name="menu_item_import_config_qrcode">Importar desde código QR</string>
+    <string name="menu_item_import_config_clipboard">Importar desde el portapapeles</string>
+    <string name="menu_item_import_config_local">Importar desde un archivo local</string>
+    <string name="menu_item_import_config_policy_group">Agregar [grupo de políticas]</string>
+    <string name="menu_item_import_config_proxy_chain">Agregar [cadena de proxy]</string>
+    <string name="menu_item_import_config_manually_vmess">Agregar [VMess]</string>
+    <string name="menu_item_import_config_manually_vless">Agregar [VLESS]</string>
+    <string name="menu_item_import_config_manually_ss">Agregar [Shadowsocks]</string>
+    <string name="menu_item_import_config_manually_socks">Añadir [CALCETINES]</string>
+    <string name="menu_item_import_config_manually_http">Agregar [HTTP]</string>
+    <string name="menu_item_import_config_manually_trojan">Agregar [troyano]</string>
+    <string name="menu_item_import_config_manually_wireguard">Agregar [WireGuard]</string>
+    <string name="menu_item_import_config_manually_hysteria2">Añadir [Hysteria2]</string>
+    <string name="menu_item_import_config_manually_masque">Agregar [MASQUE]</string>
+    <string name="confirm_delete_visible_profiles">¿Estás seguro de que deseas eliminar todos los perfiles que se muestran actualmente?</string>
+    <string name="confirm_delete_duplicate_profiles">¿Está seguro de que desea eliminar todos los perfiles duplicados que se muestran actualmente?</string>
+    <string name="confirm_delete_invalid_profiles">Primero pruebe los perfiles. ¿Está seguro de que desea eliminar todos los perfiles no válidos que se muestran actualmente?</string>
+    <string name="confirm_delete_profile">¿Estás seguro de que deseas eliminar este perfil?</string>
+    <string name="confirm_delete_policy_group">¿Está seguro de que desea eliminar este grupo de políticas?</string>
+    <string name="confirm_delete_proxy_chain_member">¿Estás seguro de que deseas eliminar este miembro de la cadena?</string>
+    <string name="confirm_delete_routing_rule">¿Está seguro de que desea eliminar esta regla de enrutamiento?</string>
+    <string name="confirm_delete_subscription_group">¿Está seguro de que desea eliminar este grupo de suscripción?</string>
+    <string name="confirm_delete_asset_file">¿Está seguro de que desea eliminar este archivo de activos?</string>
+    <string name="confirm_delete_asset_source">¿Está seguro de que desea eliminar esta fuente de recursos?</string>
+    <string name="server_lab_remarks">observaciones</string>
+    <string name="server_lab_address">dirección</string>
+    <string name="server_lab_port">port</string>
+    <string name="server_lab_id">id</string>
+    <string name="server_lab_alterid">alterId</string>
+    <string name="server_lab_security">seguridad</string>
+    <string name="server_lab_network">Red</string>
+    <string name="server_lab_more_function">Transporte</string>
+    <string name="server_lab_head_type">tipo de cabezal</string>
+    <string name="server_lab_mode_type">gModo RPC</string>
+    <string name="server_lab_request_host">anfitrión</string>
+    <string name="server_lab_request_host_http">http host</string>
+    <string name="server_lab_request_host_ws">ws host</string>
+    <string name="server_lab_request_host_httpupgrade">httpactualizar host</string>
+    <string name="server_lab_request_host_xhttp">xhttp host</string>
+    <string name="server_lab_request_host_h2">h2 anfitrión</string>
+    <string name="server_lab_request_host_quic">QUIC seguridad</string>
+    <string name="server_lab_request_host_grpc">gRPC Autoridad</string>
+    <string name="server_lab_request_host_masque">MASQUE anfitrión</string>
+    <string name="server_lab_path">ruta</string>
+    <string name="server_lab_path_ws">ws ruta</string>
+    <string name="server_lab_path_httpupgrade">httpruta de actualización</string>
+    <string name="server_lab_path_xhttp">xrutahttp</string>
+    <string name="server_lab_path_h2">h2 ruta</string>
+    <string name="server_lab_path_quic">QUIC clave</string>
+    <string name="server_lab_path_kcp">kcp semilla</string>
+    <string name="server_lab_path_grpc">gRPC nombre del servicio</string>
+    <string name="server_lab_path_masque">Ruta MASQUE</string>
+    <string name="server_lab_stream_security" translatable="false">TLS</string>
+    <string name="server_lab_stream_fingerprint">Huella digital</string>
+    <string name="server_lab_stream_alpn" translatable="false">ALPN</string>
+    <string name="server_lab_allow_insecure">allowInsecure</string>
+    <string name="server_lab_sni" translatable="false">SNI</string>
+    <string name="server_lab_address3">dirección</string>
+    <string name="server_lab_port3">puerto</string>
+    <string name="server_lab_id3">contraseña</string>
+    <string name="server_lab_security3">seguridad</string>
+    <string name="server_lab_id4">Contraseña (opcional)</string>
+    <string name="server_lab_security4">Usuario (opcional)</string>
+    <string name="server_lab_encryption">cifrado</string>
+    <string name="server_lab_flow">flujo</string>
+    <string name="server_lab_public_key">ClavePública</string>
+    <string name="server_lab_preshared_key">Clave precompartida (opcional)</string>
+    <string name="server_lab_short_id">ShortId</string>
+    <string name="server_lab_spider_x" translatable="false">SpiderX</string>
+    <string name="server_lab_mldsa65_verify" translatable="false">mldsa65Verify</string>
+    <string name="server_lab_secret_key">ClaveSecreta</string>
+    <string name="server_lab_reserved">Reservado (opcional, separado por comas)</string>
+    <string name="server_lab_local_address">Dirección local (IPv4/IPv6 opcional, separada por comas)</string>
+    <string name="server_lab_local_address_hint">Si está vacío, el valor predeterminado es %1$s. Las direcciones IPv6 se utilizan solo cuando IPv6 está habilitado.</string>
+    <string name="server_lab_masque_warp_settings">WARP</string>
+    <string name="server_lab_masque_warp_private_key">WARP Clave privada</string>
+    <string name="server_lab_masque_warp_public_key">WARP Clave pública</string>
+    <string name="server_lab_local_mtu">MTU (opcional, predeterminado 1420)</string>
+    <string name="server_lab_remote_dns">remoteDNS (opcional, IPv4/IPv6 separados por comas)</string>
+    <string name="server_lab_remote_dns_hint">Si está vacío, el valor predeterminado es %1$s. Las direcciones IPv6 se utilizan solo cuando IPv6 está habilitado.</string>
+    <string name="server_lab_kcp_mtu">mKCP MTU (opcional, predeterminado 1350)</string>
+    <string name="server_lab_kcp_tti">mKCP TTI (opcional, predeterminado 50 ms)</string>
+    <string name="toast_success">Éxito</string>
+    <string name="toast_failure">Fallo</string>
+    <string name="toast_none_data">No hay datos disponibles</string>
+    <string name="toast_incorrect_protocol">Protocolo incorrecto</string>
+    <string name="toast_decoding_failed">Error de decodificación</string>
+    <string name="title_file_chooser">Seleccione una configuración</string>
+    <string name="toast_require_file_manager">Por favor instale un administrador de archivos.</string>
+    <string name="server_customize_config">Personalizar configuración</string>
+    <string name="toast_config_file_invalid">Configuración no válida</string>
+    <string name="server_lab_content">Contenido</string>
+    <string name="toast_none_data_clipboard">No hay datos en el portapapeles</string>
+    <string name="toast_invalid_url">URL no válida</string>
+    <string name="toast_insecure_url_protocol">No utilice una URL de suscripción HTTP insegura</string>
+    <string name="server_lab_need_inbound">Asegúrese de que el puerto de entrada coincida con la configuración</string>
+    <string name="toast_malformed_json">Configuración no válida.</string>
+    <string name="server_lab_request_host6">Host (SNI) (opcional)</string>
+    <string name="toast_action_not_allowed">Acción no permitida</string>
+    <string name="server_obfs_password">Contraseña de Obfs</string>
+    <string name="server_obfs_type">Tipo de obfs</string>
+    <string name="server_lab_min_packet_size">Tamaño mínimo de paquete (opcional, predeterminado 512)</string>
+    <string name="server_lab_max_packet_size">Tamaño máximo de paquete (opcional, predeterminado 1200)</string>
+    <string name="server_lab_port_hop">Salto de puerto (anula el puerto)</string>
+    <string name="server_lab_port_hop_interval">Intervalo de salto de puerto (segundos)</string>
+    <string name="server_lab_bandwidth_down">Descargar ancho de banda (unidades admitidas: k/m/g/t)</string>
+    <string name="server_lab_bandwidth_up">Subir ancho de banda (unidades admitidas: k/m/g/t)</string>
+    <string name="server_lab_xhttp_mode">XModo HTTP</string>
+    <string name="server_lab_xhttp_extra">XHTTP JSON extra sin formato, formato: { XHTTPObject }</string>
+    <string name="server_lab_final_mask">finalMask JSON sin formato, formato: { FinalMaskObject }</string>
+    <string name="server_lab_ech_config_list" translatable="false">echConfigList</string>
+    <string name="server_lab_verify_peer_cert_by_name">Verificar certificado de pares por nombre</string>
+    <string name="server_lab_pinned_ca256">Certificado de huella digital (SHA-256)</string>
+    <string name="server_lab_browser_dialer">Habilitar marcador del navegador</string>
+    <string name="server_lab_browser_dialer_tip">Solo admite xhttp (paquete-up) y ws salientes; La configuración relacionada con TLS puede ignorarse o entrar en conflicto</string>
+    <string name="toast_allow_insecure_deprecated">Este servidor usa una conexión sin cifrar. Tu tráfico podría quedar expuesto. Activa TLS o contacta a tu proveedor para actualizar la seguridad.</string>
+    <string name="pinned_ca256_action_fetch">Obtener huella digital del certificado</string>
+    <string name="toast_fetch_cert_sha256_success">Huella digital del certificado obtenida correctamente</string>
+    <string name="toast_fetch_cert_sha256_failed">Error al recuperar la huella digital del certificado</string>
+    <string name="toast_asset_copy_failed">Error al copiar el archivo, utilice el Administrador de archivos</string>
+    <string name="menu_item_add_asset">Agregar activo</string>
+    <string name="menu_item_add_file">Agregar archivos</string>
+    <string name="menu_item_add_url">Agregar URL</string>
+    <string name="menu_item_scan_qrcode">Escanear código QR</string>
+    <string name="title_url" translatable="false">URL</string>
+    <string name="menu_item_download_file">Descargar archivos</string>
+    <string name="title_user_asset_add_url">Agregar URL de recurso</string>
+    <string name="msg_file_not_found">Archivo no encontrado</string>
+    <string name="msg_remark_is_duplicate">Este nombre ya existe</string>
+    <string name="asset_geo_files_sources">Fuente del archivo geográfico (opcional)</string>
+    <string name="msg_dialog_progress">Cargando</string>
+    <string name="menu_item_search">Buscar</string>
+    <string name="menu_item_select_all">Seleccionar todo</string>
+    <string name="menu_item_invert_selection">Invertir selección</string>
+    <string name="msg_enter_keywords">Ingrese palabras clave</string>
+    <string name="switch_bypass_apps_mode">Modo de derivación</string>
+    <string name="menu_item_select_proxy_app">Seleccionar automáticamente aplicaciones para ser proxy</string>
+    <string name="msg_downloading_content">Descargando contenido</string>
+    <string name="menu_item_export_proxy_app">Exportar al Portapapeles</string>
+    <string name="menu_item_import_proxy_app">Importar desde el portapapeles</string>
+    <string name="per_app_proxy_settings">Configuración por aplicación</string>
+    <string name="per_app_proxy_settings_enable">Habilitar por aplicación</string>
+    <string name="app_picker_unknown_app">Aplicación desconocida (UID no reconocido)</string>
+    <string name="title_settings">Configuración</string>
+    <string name="title_advanced">Configuración avanzada</string>
+    <string name="title_core_settings">Configuración principal</string>
+    <string name="title_vpn_settings">Configuración de VPN</string>
+    <string name="title_pref_per_app_proxy">Proxy por aplicación</string>
+    <string name="summary_pref_per_app_proxy">General: las aplicaciones marcadas usan el proxy y las aplicaciones no marcadas se conectan directamente;\nModo de derivación: las aplicaciones marcadas se conectan directamente y las aplicaciones no marcadas usan el proxy.\nLa opción para seleccionar automáticamente las aplicaciones que deben usar el proxy está en el menú.</string>
+    <string name="title_pref_is_booted">Conectar después del inicio del dispositivo</string>
+    <string name="summary_pref_is_booted">Conéctese automáticamente al servidor seleccionado después de que se inicie el dispositivo. Android puede restringir el inicio en segundo plano.</string>
+    <string name="title_system_vpn_settings">Configuración de VPN del sistema</string>
+    <string name="summary_system_vpn_settings">Abra la configuración de VPN de Android para configurar una VPN siempre activa, si es compatible con este dispositivo.</string>
+    <string name="toast_system_vpn_settings_unavailable">La configuración de VPN del sistema no está disponible.</string>
+    <string name="subscription_updater_job_tips">La tarea se ejecutará en segundo plano y la información del progreso se mostrará en la notificación.</string>
+    <string name="title_pref_auto_test_after_update_subscription">Prueba automática después de actualizar la suscripción</string>
+    <string name="summary_pref_auto_test_after_update_subscription">Las pruebas automatizadas llevan mucho tiempo. Si está habilitada, la tarea se ejecutará en segundo plano; de lo contrario, se ejecutará en la página actual.</string>
+    <string name="title_pref_auto_remove_invalid_after_test">Eliminar automáticamente la configuración no válida después de la prueba</string>
+    <string name="summary_pref_auto_remove_invalid_after_test">Es posible que los resultados de la prueba no sean precisos; La configuración eliminada no se puede recuperar.</string>
+    <string name="title_pref_auto_sort_after_test">Ordenación automática después de la prueba</string>
+    <string name="summary_pref_auto_sort_after_test">Los resultados de la prueba pueden no ser precisos;</string>
+    <string name="title_mux_settings">Configuración de Mux</string>
+    <string name="title_pref_mux_enabled">Habilitar Mux</string>
+    <string name="summary_pref_mux_enabled">Más rápido, pero puede provocar una conectividad inestable\nPersonalice cómo manejar TCP, UDP y QUIC a continuación</string>
+    <string name="title_pref_mux_concurrency">Conexiones TCP (rango -1 a 1024)</string>
+    <string name="title_pref_mux_xudp_concurrency">XConexiones UDP (rango -1 a 1024)</string>
+    <string name="title_pref_mux_xudp_quic">Manejo de QUIC en túnel mux</string>
+    <string-array name="mux_xudp_quic_entries">
+        <item>rechazar</item>
+        <item>permitir</item>
+        <item>saltar</item>
+    </string-array>
+    <string name="title_pref_speed_enabled">Habilitar visualización de velocidad</string>
+    <string name="summary_pref_speed_enabled">Muestre las velocidades actuales en la notificación.\nEl icono indica si el tráfico proxy o directo es dominante.</string>
+    <string name="title_pref_sniffing_enabled">Habilitar rastreo</string>
+    <string name="summary_pref_sniffing_enabled">Detectar dominios de destino a partir del tráfico (habilitado de forma predeterminada).</string>
+    <string name="title_pref_route_only_enabled">Habilitar solo ruta</string>
+    <string name="summary_pref_route_only_enabled">Utilice el nombre de dominio rastreado solo para enrutamiento y mantenga la dirección de destino como dirección IP.</string>
+    <string name="title_pref_local_dns_enabled">Habilitar DNS local</string>
+    <string name="summary_pref_local_dns_enabled">DNS procesado por el módulo DNS del núcleo (recomendado si necesita enrutamiento sin pasar por direcciones LAN y continentales)</string>
+    <string name="title_pref_fake_dns_enabled">Habilitar DNS falso</string>
+    <string name="summary_pref_fake_dns_enabled">FakeDNS devuelve direcciones IP sintéticas para búsquedas de dominios (más rápido, pero es posible que no funcione con algunas aplicaciones).</string>
+    <string name="title_pref_ipv6_enabled">Habilitar IPv6</string>
+    <string name="summary_pref_ipv6_enabled">Agregar dirección IPv6 y rutas a la interfaz VPN</string>
+    <string name="title_pref_prefer_ipv6">Prefiere IPv6</string>
+    <string name="summary_pref_prefer_ipv6">Preferir direcciones IPv6 al resolver nombres de dominio</string>
+    <string name="title_pref_remote_dns">DNS remoto (UDP/TCP/HTTPS/QUIC, opcional)</string>
+    <string name="summary_pref_remote_dns" translatable="false">DNS</string>
+    <string name="title_pref_vpn_dns">VPN DNS (solo IPv4/IPv6)</string>
+    <string name="title_pref_vpn_bypass_lan">Evitar LAN en modo VPN</string>
+    <string name="title_pref_vpn_interface_address">VPN Dirección de interfaz</string>
+    <string name="title_pref_vpn_mtu">VPN MTU (predeterminado 1500)</string>
+    <string name="title_pref_domestic_dns">DNS directo (opcional)</string>
+    <string name="summary_pref_domestic_dns" translatable="false">DNS</string>
+    <string name="title_pref_dns_hosts">Asignaciones de host DNS (formato: dominio: dirección,…)</string>
+    <string name="summary_pref_dns_hosts">dominio:dirección,…</string>
+    <string name="title_pref_delay_test_url">URL de prueba de retraso real</string>
+    <string name="summary_pref_delay_test_url" translatable="false">URL</string>
+    <string name="title_pref_real_ping_concurrency">Pruebas concurrentes de retardo real</string>
+    <string name="title_pref_ip_api_url">URL de prueba de información de conexión actual</string>
+    <string name="summary_pref_ip_api_url" translatable="false">URL</string>
+    <string name="title_pref_proxy_sharing_enabled">Permitir conexiones desde LAN</string>
+    <string name="summary_pref_proxy_sharing_enabled">Otros dispositivos pueden conectarse al proxy mediante su dirección IP a través del proxy local. Habilítelo solo en redes confiables para evitar conexiones no autorizadas</string>
+    <string name="toast_warning_pref_proxysharing_short">Permitir conexiones desde la LAN. Asegúrate de estar en una red de confianza</string>
+    <string name="title_pref_socks_port">Puerto proxy local</string>
+    <string name="title_pref_enable_local_proxy">Habilitar proxy local</string>
+    <string name="summary_pref_enable_local_proxy">Cuando está deshabilitado, no hay ningún proxy SOCKS disponible, por lo que las actualizaciones de suscripción y acciones similares no pueden usar el proxy</string>
+    <string name="title_pref_socks_enable_udp" translatable="false">SOCKS5 UDP</string>
+    <string name="summary_pref_socks_enable_udp">SOCKS5 no es completamente segura cuando se utiliza UDP.</string>
+    <string name="summary_pref_socks_port">Puerto proxy local</string>
+    <string name="title_pref_dynamic_socks_port">Habilitar puerto proxy local dinámico</string>
+    <string name="summary_pref_dynamic_socks_port">Utilice un puerto proxy local aleatorio para cada entrada</string>
+    <string name="title_pref_socks_username">Nombre de usuario de proxy local (opcional)</string>
+    <string name="summary_pref_socks_username">Nombre de usuario</string>
+    <string name="title_pref_socks_password">Contraseña de proxy local (opcional)</string>
+    <string name="summary_pref_socks_password">Contraseña</string>
+    <string name="title_pref_local_dns_port">Puerto DNS local</string>
+    <string name="summary_pref_local_dns_port">Puerto DNS local</string>
+    <string name="title_pref_confirm_remove">Eliminar confirmación de configuración</string>
+    <string name="summary_pref_confirm_remove">Si eliminar una configuración requiere una segunda confirmación por parte del usuario</string>
+    <string name="title_pref_append_http_proxy">Agregar proxy HTTP a VPN</string>
+    <string name="summary_pref_append_http_proxy">Permitir que los navegadores y las aplicaciones compatibles utilicen el proxy HTTP directamente en lugar de la interfaz de red virtual (Android 10+).</string>
+    <string name="title_pref_double_column_display">Usar diseño de dos columnas</string>
+    <string name="summary_pref_double_column_display">Muestra la lista de perfiles en dos columnas para que quepa más contenido en la pantalla.</string>
+    <string name="title_pref_group_all_display">Mostrar una pestaña de grupo "Todos"</string>
+    <string name="summary_pref_group_all_display">Combine perfiles de cada grupo de suscripción en una pestaña.</string>
+    <string name="title_pref_feedback">Comentarios</string>
+    <string name="summary_pref_feedback">Sugerir mejoras o informar errores en GitHub</string>
+    <string name="summary_pref_tg_group">Únete al grupo de Telegram</string>
+    <string name="toast_tg_app_not_found">Aplicación Telegram no encontrada</string>
+    <string name="title_privacy_policy">Política de privacidad</string>
+    <string name="title_qr_code">código QR</string>
+    <string name="title_about">Acerca de</string>
+    <string name="title_source_code">Código fuente</string>
+    <string name="title_oss_license">Licencias de código abierto</string>
+    <string name="title_translators">Traductores</string>
+    <string name="title_tg_channel">Canal de Telegram</string>
+    <string name="title_pref_promotion">Promoción</string>
+    <string name="title_pref_auto_update_subscription">Actualizar suscripciones automáticamente</string>
+    <string name="summary_pref_auto_update_subscription">Actualice sus suscripciones automáticamente a intervalos establecidos en segundo plano. Dependiendo del dispositivo, es posible que esta función no siempre funcione</string>
+    <string name="title_pref_auto_update_interval">Intervalo de actualización automática (minutos; mínimo 15)</string>
+    <string name="title_core_loglevel">Nivel de registro</string>
+    <string name="title_outbound_domain_resolve_method">Resolución de dominio saliente</string>
+    <string name="title_mode">Modo</string>
+    <string name="title_mode_help">Haz clic en mí para obtener más ayuda</string>
+    <string name="title_language">Idioma</string>
+    <string name="title_ui_settings">Configuración de UI</string>
+    <string name="title_pref_ui_mode_night">Configuración del modo UI</string>
+    <string name="title_pref_dynamic_color">Habilitar color dinámico</string>
+    <string name="summary_pref_dynamic_color">Solo funciona en dispositivos Android 12+</string>
+    <string name="title_pref_use_hev_tunnel">Uso Hev TUN</string>
+    <string name="summary_pref_use_hev_tunnel">Cuando esté habilitado, TUN utilizará hev-socks5-tunnel; de lo contrario, utilizará xray-core.</string>
+    <string name="title_pref_hev_tunnel_loglevel">Hev Nivel de registro TUN</string>
+    <string name="title_pref_hev_tunnel_rw_timeout">Hev Tiempo de espera de lectura/escritura de TUN (segundos; valores predeterminados de TCP/UDP: 300/60)</string>
+    <string name="title_mode_settings">Configuración de modo</string>
+    <string name="title_root_mode_enabled">Habilitar modo root (usuarios root)</string>
+    <string name="summary_root_mode_enabled">Utilice acceso raíz para proxy transparente de bajo nivel. El modo raíz maneja el tráfico de red directamente en lugar de utilizar el servicio VPN de Android. El modo estándar, el enrutamiento por aplicación y las configuraciones relacionadas con VPN no se aplican mientras el modo raíz está habilitado.</string>
+    <string name="toast_root_required">Se requiere acceso root para esta función</string>
+    <string name="title_root_lan_sharing">Compartir VPN con LAN/dispositivos conectados (usuarios root)</string>
+    <string name="summary_root_lan_sharing">Enrute el tráfico desde el punto de acceso Wi-Fi y los dispositivos conectados a USB a través de la VPN.</string>
+    <string name="title_logcat" translatable="false">Logcat</string>
+    <string name="logcat_copy">Copia</string>
+    <string name="logcat_clear">Borrar</string>
+    <string name="logcat_share">Compartir registro</string>
+    <string name="title_service_restart">Reiniciar servicio</string>
+    <string name="title_del_all_config">Eliminar configuraciones</string>
+    <string name="title_del_duplicate_config">Eliminar configuraciones duplicadas</string>
+    <string name="title_del_invalid_config">Eliminar configuraciones no válidas</string>
+    <string name="title_export_all">Exportar configuraciones al portapapeles</string>
+    <string name="title_sub_setting">Suscripciones</string>
+    <string name="sub_setting_remarks">Observaciones</string>
+    <string name="sub_setting_url">URL opcional</string>
+    <string name="sub_setting_user_agent" translatable="false">User Agent</string>
+    <string name="sub_setting_request_headers">Encabezados de solicitud (formato JSON)</string>
+    <string name="sub_setting_filter">Filtro de comentarios (expresión regular)</string>
+    <string name="sub_setting_enable">Habilitar actualización</string>
+    <string name="sub_auto_update">Habilitar actualización automática</string>
+    <string name="sub_allow_insecure_url">Permitir dirección HTTP insegura</string>
+    <string name="sub_setting_pre_profile">Proxy de entrada</string>
+    <string name="sub_setting_next_profile">Salir del proxy</string>
+    <string name="sub_setting_pre_profile_tip">Asegúrese de que los comentarios de configuración existan y sean únicos</string>
+    <string name="sub_setting_entry_proxy_tip">El proxy seleccionado se agrega antes de cada perfil en esta suscripción como enlace de entrada en la cadena de proxy para ese perfil.</string>
+    <string name="sub_setting_exit_proxy_tip">El proxy seleccionado se agrega después de cada perfil en esta suscripción como enlace de salida en la cadena de proxy para ese perfil.</string>
+    <string name="toast_invalid_update_interval">Intervalo de actualización no válido. El mínimo es 15 minutos.</string>
+    <string name="title_sub_update">Actualizar suscripción</string>
+    <string name="title_ping_all_server">Prueba de retrasos TCP (TCPing)</string>
+    <string name="title_real_ping_all_server">Prueba de retrasos reales</string>
+    <string name="title_user_asset_setting">Archivos de activos</string>
+    <string name="title_sort_by_test_results">Ordenar por resultados de pruebas</string>
+    <string name="title_filter_config">Configuraciones de filtro</string>
+    <string name="filter_config_all">Todos</string>
+    <string name="summary_scan_qrcode">Toque la pantalla para abrir la cámara y escanear</string>
+    <string name="title_del_duplicate_config_count">Eliminar configuraciones duplicadas %d</string>
+    <string name="title_del_config_count">Eliminar configuraciones %d</string>
+    <string name="title_import_config_count">Importar configuraciones %d</string>
+    <string name="title_export_config_count">Exportar configuraciones %d</string>
+    <plurals name="title_update_config_count">
+        <item quantity="one">Configuración %1$d actualizada</item>
+        <item quantity="other">Configuraciones %1$d actualizadas</item>
+    </plurals>
+    <plurals name="title_update_asset_count">
+        <item quantity="one">Archivo de activos %1$d actualizado</item>
+        <item quantity="other">Archivos de activos %1$d actualizados</item>
+    </plurals>
+    <string name="title_update_subscription_result">Configuraciones %1$d actualizadas (%2$d exitoso, %3$d fallido, %4$d omitido)</string>
+    <string name="title_update_subscription_no_subscription">Sin suscripciones</string>
+    <string name="toast_server_not_found_in_group">El servidor seleccionado no se encuentra en el grupo actual</string>
+    <string name="title_locate_selected_config">Encontrar la configuración seleccionada</string>
+    <string name="tasker_start_service">Iniciar servicio</string>
+    <string name="tasker_setting_confirm">Confirmar</string>
+    <string name="routing_settings_domain_strategy">Estrategia de dominio</string>
+    <string name="routing_settings_title">Configuración de ruta</string>
+    <string name="routing_settings_tips">A se aplica solo cuando se cumplen todas las condiciones coincidentes configuradas (Y). Las reglas se verifican de arriba a abajo; se aplica la primera regla de coincidencia.</string>
+    <string name="routing_settings_comma_tip">Separe varias entradas con comas (,).</string>
+    <string name="routing_settings_save">Guardar</string>
+    <string name="routing_settings_delete">Borrar</string>
+    <string name="routing_settings_rule_title">Configuración de reglas de enrutamiento</string>
+    <string name="routing_settings_add_rule">Agregar regla</string>
+    <string name="routing_settings_import_predefined_rulesets">Importar conjuntos de reglas predefinidos</string>
+    <string name="routing_settings_import_rulesets_tip">Se eliminarán los conjuntos de reglas existentes. ¿Continuar?</string>
+    <string name="routing_settings_import_rulesets_from_clipboard">Importar conjunto de reglas desde el portapapeles</string>
+    <string name="routing_settings_import_rulesets_from_qrcode">Importar conjunto de reglas desde código QR</string>
+    <string name="routing_settings_export_rulesets_to_clipboard">Exportar conjunto de reglas al portapapeles</string>
+    <string name="routing_settings_locked">Bloqueado; mantenga esta regla al importar ajustes preestablecidos</string>
+    <string name="routing_settings_domain" translatable="false">domain</string>
+    <string name="routing_settings_ip" translatable="false">ip</string>
+    <string name="routing_settings_process">proceso (Nombre del paquete: solo se admite cuando se usa Xray TUN, solo ruta habilitada y Android 10+)</string>
+    <string name="routing_settings_process_select">Seleccione el nombre del paquete</string>
+    <string name="routing_settings_port" translatable="false">port</string>
+    <string name="routing_settings_protocol" translatable="false">protocol</string>
+    <string name="routing_settings_protocol_tip" translatable="false">[http,tls,bittorrent]</string>
+    <string name="routing_settings_network" translatable="false">network</string>
+    <string name="routing_settings_outbound_tag_hint">proxy / directo / bloque / &lt;%1$s&gt;</string>
+    <string name="routing_settings_outbound_tag" translatable="false">outboundTag</string>
+    <string name="connection_test_pending">Comprobar conectividad</string>
+    <string name="connection_test_testing">Probando…</string>
+    <string name="connection_test_testing_count">Probando las configuraciones de %d…</string>
+    <string name="connection_test_available">La conexión se realizó correctamente en %1$s</string>
+    <string name="server_test_delay_value">%1$d ms</string>
+    <string name="connection_test_error">Error en la prueba de conexión: %s</string>
+    <string name="connection_test_fail">Internet no disponible</string>
+    <string name="connection_test_error_status_code">Error código: #%d</string>
+    <string name="connection_connected">Conectado. Toque para verificar la conexión.</string>
+    <string name="connection_not_connected">No conectado</string>
+    <string name="connection_running_task_left">Pruebas en ejecución: %s</string>
+    <string name="import_subscription_success">Suscripción importada correctamente</string>
+    <string name="import_subscription_failure">Error en la suscripción de importación</string>
+    <string name="title_fragment_settings">Configuración de fragmentos</string>
+    <string name="title_pref_fragment_packets">Paquetes de fragmentos</string>
+    <string name="title_pref_fragment_length">Longitud del fragmento (mín-máx)</string>
+    <string name="title_pref_fragment_interval">Intervalo de fragmentos (mín.-máx.)</string>
+    <string name="title_pref_fragment_enabled">Habilitar fragmento</string>
+    <string name="title_pref_fragment_maxsplit">División máxima de fragmentos</string>
+    <string name="title_observatory_settings">Configuración del Observatorio</string>
+    <string name="title_pref_observatory_least_ping_interval">intervalo mínimo de ping</string>
+    <string name="title_pref_observatory_least_load_interval">Intervalo de carga mínima</string>
+    <string name="title_pref_observatory_least_load_method">método HTTP de carga mínima</string>
+    <string name="title_pref_observatory_least_load_sampling">muestreo de carga mínima</string>
+    <string name="title_pref_observatory_least_load_timeout">Tiempo de espera mínimo de carga</string>
+    <string name="toast_invalid_observatory_duration">Duración no válida. Utilice un valor como 3 mo 30 s.</string>
+    <string name="toast_invalid_observatory_sampling">Muestreo no válido. Utilice un número positivo.</string>
+    <string name="update_check_for_update">Buscar actualizaciones</string>
+    <string name="update_already_latest_version">Ya en la última versión</string>
+    <string name="update_new_version_found">Nueva versión encontrada: %s</string>
+    <string name="update_now">Actualizar ahora</string>
+    <string name="update_check_pre_release">Ver versiones preliminares</string>
+    <string name="update_checking_for_update">Buscando actualizaciones…</string>
+    <string name="title_policy_group_type">Tipo de grupo de políticas</string>
+    <string name="title_policy_group_subscription_id">Del grupo de suscripción</string>
+    <string name="title_policy_group_subscription_filter">Filtro de expresiones regulares de comentarios</string>
+    <string name="title_policy_group_test_outbounds">Probar límites</string>
+    <string name="title_policy_group_fallback">Salida alternativa (opcional)</string>
+    <string name="server_proxy_chain_members">Miembros de la cadena de proxy</string>
+    <string name="server_proxy_chain_pick_members">Toca aquí para elegir un miembro</string>
+    <string name="server_proxy_chain_member_unselected">Seleccione un miembro</string>
+    <string name="server_proxy_chain_members_unselected">Seleccione un miembro para cada fila de la cadena</string>
+    <string name="server_proxy_chain_members_insufficient">Miembros insuficientes</string>
+    <string name="server_proxy_chain_members_invalid">Miembros de la cadena no válidos: %1$s</string>
+    <string name="title_configuration_backup_restore">Copia de seguridad y restauración</string>
+    <string name="title_configuration_backup">Configuración de copia de seguridad</string>
+    <string name="title_configuration_restore">Restaurar configuración</string>
+    <string name="title_profile_storage_cleanup">Reparar almacenamiento de perfil</string>
+    <string name="summary_profile_storage_cleanup">Eliminar datos de perfil no utilizados</string>
+    <string name="message_profile_storage_cleanup">¿Eliminar datos de perfil que ya no son utilizados por ningún grupo? Se conservarán los perfiles seleccionados y los datos que no se puedan clasificar de forma segura.</string>
+    <string name="toast_profile_storage_cleanup">Perfiles no utilizados eliminados: %1$d</string>
+    <string name="toast_profile_storage_cleanup_skipped">El almacenamiento del perfil no se pudo clasificar de forma segura. No se eliminó nada.</string>
+    <string name="title_configuration_share">Compartir configuración</string>
+    <string name="title_webdav_config_setting">Configuración WebDAV</string>
+    <string name="title_webdav_config_setting_unknown">Primero configure WebDAV.</string>
+    <string name="title_webdav_url">URL del servidor WebDAV</string>
+    <string name="title_webdav_user">Nombre de usuario</string>
+    <string name="title_webdav_pass">Contraseña</string>
+    <string name="title_webdav_remote_path">Directorio remoto (opcional)</string>
+    <string name="share_method_qrcode">código QR</string>
+    <string name="share_method_clipboard">Copiar enlace de perfil</string>
+    <string name="share_method_full_content">Copiar configuración completa</string>
+    <string name="action_edit">Editar</string>
+    <string name="action_delete">Eliminar</string>
+    <string name="action_close">Cerrar</string>
+    <string name="share_subscription_qrcode">código QR</string>
+    <string name="share_subscription_clipboard">Exportar al portapapeles</string>
+    <string-array name="mode_entries">
+        <item>VPN</item>
+        <item>Solo proxy</item>
+    </string-array>
+    <string-array name="browser_dialer_mode">
+        <item>Desactivar</item>
+        <item>OkHttp</item>
+        <item>WebView</item>
+    </string-array>
+    <string-array name="ui_mode_night">
+        <item>Seguir sistema</item>
+        <item>Light</item>
+        <item>Oscuro</item>
+    </string-array>
+    <string name="routing_preset_china_whitelist">Lista blanca de China</string>
+    <string name="routing_preset_china_blacklist">Lista negra de China</string>
+    <string name="routing_preset_global">Global</string>
+    <string name="routing_preset_iran_whitelist">Lista blanca de Irán</string>
+    <string name="routing_preset_russia_whitelist">Lista blanca de Rusia</string>
+    <string-array name="vpn_bypass_lan">
+        <item>Seguir configuración</item>
+        <item>Omitir</item>
+        <item>No omitir</item>
+    </string-array>
+    <string-array name="outbound_domain_resolve_method">
+        <item>No resolver</item>
+        <item>Resolver y agregar a hosts DNS</item>
+        <item>Resolver y reemplazar dominio</item>
+    </string-array>
+    <string-array name="policy_group_type">
+        <item>Ping mínimo</item>
+        <item>Mínima carga</item>
+        <item>Aleatorio</item>
+        <item>Round Robin</item>
+    </string-array>
+    <string name="backup_location_local">Local</string>
+    <string name="backup_location_webdav" translatable="false">WebDAV</string>
+    <string name="acc_refresh">Actualizar registro</string>
+    <string name="toast_permission_denied_for">%1$s permiso denegado</string>
+    <string name="acc_add_subscription">Agregar suscripción</string>
+    <string name="toast_malformed_json_detail">Configuración no válida: %1$s</string>
+    <string name="acc_add_asset">Agregar fuente de activos</string>
+    <string name="acc_download_file">Descargar archivos de activos</string>
+    <string name="acc_qr_code">código QR</string>
+    <string name="acc_copy_log">Copiar registro</string>
+    <string name="acc_clear_log">Borrar registro</string>
+    <string name="acc_add_rule">Agregar regla de enrutamiento</string>
+    <string name="acc_start">Iniciar servicio</string>
+    <string name="acc_stop">Detener servicio</string>
+    <string name="acc_back">Volver</string>
+    <string name="acc_search">Buscar</string>
+    <string name="acc_add">Agregar configuración</string>
+    <string name="acc_more">Más opciones</string>
+    <string name="acc_selected_server">Seleccionado</string>
+    <string name="acc_share_subscription">Compartir enlace de suscripción</string>
+    <string name="acc_share_log">Compartir registro</string>
+    <string name="acc_remove">Eliminar miembro de la cadena de proxy</string>
+    <string name="acc_add_member">Agregar miembro de la cadena de proxy</string>
+    <string name="acc_start_scanner">Iniciar escáner QR</string>
+    <string name="acc_stop_scanner">Detener el escáner QR</string>
+    <string name="acc_turn_torch_on">Enciende la linterna</string>
+    <string name="acc_turn_torch_off">Apagar la linterna</string>
+    <string name="acc_select_image">Seleccione la imagen para escanear</string>
+    <string name="acc_locked">Esta regla se mantiene al importar ajustes preestablecidos</string>
+    <string name="acc_open_menu">Abrir menú de navegación</string>
+    <string name="acc_edit">Editar</string>
+    <string name="acc_delete">Eliminar</string>
+    <string name="acc_save">Guardar</string>
+    <string name="acc_update_subscriptions">Actualizar suscripciones</string>
+    <string name="acc_per_app_proxy_information">Información de proxy por aplicación</string>
+    <string name="permission_camera">Cámara</string>
+    <string name="permission_notification">Notificación</string>
+    <string name="permission_local_network">Red local</string>
+    <string name="subscription_update_updating">Actualización de suscripción: %1$s</string>
+    <string name="subscription_update_progress">Prueba %2$s: %1$s</string>
+    <string name="tasker_blurb_start">Iniciar %1$s</string>
+    <string name="tasker_blurb_stop">Detener %1$s</string>
+    <string name="connection_test_empty_message">no hay detalles disponibles</string>
+    <string name="value_unknown">desconocido</string>
+    <string name="sub_info_open_support">Abrir enlace de soporte</string>
+    <string name="sub_info_open_page">Abrir página de suscripción</string>
+    <string name="sub_info_traffic" translatable="false">%1$s / %2$s</string>
+    <string name="sub_info_unlimited">Ilimitado</string>
+    <string name="action_exit">Salir</string>
+    <string name="action_back">Volver</string>
+    <string name="action_more">Más</string>
+    <string name="action_clear">Borrar</string>
+    <string name="connection_connected_tv">Conectado</string>
+</resources>
