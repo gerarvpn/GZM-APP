@@ -15,7 +15,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.Process
 import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -124,6 +123,7 @@ val status: GzmStatus? = null,
 val hasConfig: Boolean = false,
 val assetsReady: Boolean = false,
 val initialized: Boolean = false,
+val stateLoading: Boolean = true,
 val running: Boolean = false,
 val starting: Boolean = false,
 val syncing: Boolean = false,
@@ -240,29 +240,28 @@ proxyPass = GzmSettings.proxyPass(),
 )
 }
 private suspend fun prepareGeoAssets(): Boolean = withContext(Dispatchers.IO) {
-val startedAt = SystemClock.elapsedRealtime()
-val ready = GzmGeoAssets.ensure(getApplication<Application>())
-val elapsed = SystemClock.elapsedRealtime() - startedAt
-if (elapsed >= 5_000L) GzmDiagnostics.recordMessage(getApplication(), "Rendimiento", "Preparar los datos locales de Xray tardó ${elapsed} ms.")
-ready
+GzmGeoAssets.ensure(getApplication<Application>())
 }
 private fun reload() {
-// Render the cached account and connection screen immediately. Large Xray geo files and
-// profile recovery are prepared in the background so opening GZMNET never waits on file I/O.
-_ui.update {
-it.copy(
-    hasToken = GzmPanel.hasToken(),
-    status = GzmPanel.loadStatus(),
-    hasConfig = GzmPanel.hasConfig(),
-    initialized = true,
+// Show the app shell first. Account crypto reads, profile migration and Xray assets all run off-main.
+_ui.update { it.copy(initialized = true, syncing = true) }
+viewModelScope.launch {
+val cached = withContext(Dispatchers.IO) {
+GzmUi(
+hasToken = GzmPanel.hasToken(),
+status = GzmPanel.loadStatus(),
+hasConfig = GzmPanel.hasConfig(),
+initialized = true,
+stateLoading = false,
+syncing = true,
 ).let(loadSettings())
 }
-viewModelScope.launch {
-val profileStartedAt = SystemClock.elapsedRealtime()
-withContext(Dispatchers.IO) { GzmSettings.ensureVpnMode() }
-withContext(Dispatchers.IO) { GzmPanel.ensureProfile() }
-val profileElapsed = SystemClock.elapsedRealtime() - profileStartedAt
-if (profileElapsed >= 5_000L) GzmDiagnostics.recordMessage(getApplication(), "Rendimiento", "Recuperar el perfil guardado tardó ${profileElapsed} ms.")
+_ui.update { current -> cached.copy(stateLoading = false, starting = current.starting, running = current.running, appRateUp = current.appRateUp, appRateDown = current.appRateDown) }
+withContext(Dispatchers.IO) {
+GzmSettings.initializeAppSettings(getApplication())
+GzmSettings.ensureVpnMode()
+GzmPanel.ensureProfile()
+}
 val assetsReady = prepareGeoAssets()
 _ui.update {
 it.copy(
@@ -276,11 +275,10 @@ if (GzmPanel.hasToken()) refreshLiveStatus()
 }
 }
 private fun markRunning() {
-val elapsed = startAttemptStartedAt.takeIf { it > 0L }?.let { (SystemClock.elapsedRealtime() - it).coerceAtLeast(0L) }
-if (elapsed != null) GzmDiagnostics.recordMessage(getApplication(), "Rendimiento", "La VPN confirmó conexión en ${elapsed} ms desde que se tocó conectar.")
+// The reconnect flag was persisted before starting the service. Do not encrypt/write it again
+// on the main thread here: Android TV Keystore calls added several seconds after Xray started.
 startAttemptStartedAt = 0L
 startAttemptId++
-GzmPanel.setReconnectAfterUpdate(true)
 _ui.update { it.copy(running = true, starting = false, error = null) }
 if (activityVisible) {
 MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_START, "")
@@ -593,10 +591,8 @@ runCatching { connectivityManager?.registerDefaultNetworkCallback(networkCallbac
 setContent { GzmApp(vm, ::toggle, isTv) }
 // Defer non-visual startup work until after the first frame, and capture cold-start slowness.
 window.decorView.post {
-val coldStartMs = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
-if (coldStartMs >= 2_500L) GzmDiagnostics.recordMessage(this, "Rendimiento", "La app tardó ${coldStartMs} ms en mostrar su pantalla inicial.")
 if (Build.VERSION.SDK_INT >= 33) runCatching { notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
-if (GzmPanel.hasToken()) runCatching { GzmSyncWorker.schedule(this) }
+if (GzmPanel.hasToken()) Thread({ runCatching { GzmSyncWorker.schedule(applicationContext) } }, "gzm-work-schedule").apply { priority = Thread.NORM_PRIORITY - 1; start() }
 }
 }
 override fun onResume() {
@@ -615,7 +611,6 @@ connectivityManager = null
 super.onDestroy()
 }
 private fun toggle() {
-runCatching { GzmSettings.ensureVpnMode() }
 val ui = vm.ui.value
 if (ui.starting) {
 GzmPanel.setReconnectAfterUpdate(false)
@@ -637,12 +632,6 @@ return
 if (!ui.assetsReady || !ui.hasConfig) {
 vm.startFailed(ui.error ?: "La cuenta todavía se está preparando. Espera un momento y vuelve a tocar conectar.")
 if (GzmPanel.hasToken()) vm.refresh()
-return
-}
-runCatching { GzmPanel.ensureProfile() }
-if (!GzmPanel.hasConfig()) {
-vm.startFailed("No hay servidores guardados para esta cuenta. Comprueba internet y pulsa Actualizar.")
-vm.refresh()
 return
 }
 if (!ui.offline && ui.status != null && !ui.status.isActive) {
@@ -767,8 +756,12 @@ Spacer(Modifier.height(20.dp))
 PowerButton(running = ui.running, enabled = ui.canConnect || ui.running, onClick = onToggle, starting = ui.starting)
 if (!ui.hasToken) {
 Spacer(Modifier.height(10.dp))
+if (ui.stateLoading) {
+Text("Cargando cuenta…", color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
+} else {
 Text("Vincula una cuenta desde Ajustes para activar la VPN. Puedes explorar las opciones mientras tanto.", color = Muted, fontSize = 13.sp, textAlign = TextAlign.Center)
 TextButton(onClick = onOpenSettings) { Text("Vincular cuenta", color = Blue) }
+}
 }
 if (ui.running) {
 Spacer(Modifier.height(10.dp))

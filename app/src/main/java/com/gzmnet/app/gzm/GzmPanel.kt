@@ -126,11 +126,20 @@ object GzmPanel {
         return id
     }
 
+    private const val K_RECONNECT_AFTER_UPDATE = "gzm_reconnect_after_update"
+
+    /** This is a non-secret control flag; store it in MMKV to avoid synchronous Keystore work on tap. */
     fun setReconnectAfterUpdate(enabled: Boolean) = runCatching {
-        GzmCrypto.writeSecure(F_RECONNECT_UPDATE, if (enabled) "1".toByteArray() else "0".toByteArray())
+        MmkvManager.encodeSettings(K_RECONNECT_AFTER_UPDATE, if (enabled) "1" else "0")
     }
-    // On the first upgrade this flag did not exist; preserve the previous install's account intent.
-    fun reconnectAfterUpdate(): Boolean = GzmCrypto.readSecure(F_RECONNECT_UPDATE)?.let { String(it) == "1" } ?: true
+
+    // Migrate the previous encrypted flag once; if it did not exist, preserve the old default.
+    fun reconnectAfterUpdate(): Boolean {
+        MmkvManager.decodeSettingsString(K_RECONNECT_AFTER_UPDATE)?.let { return it == "1" }
+        val legacy = GzmCrypto.readSecure(F_RECONNECT_UPDATE)?.let { String(it) == "1" } ?: true
+        MmkvManager.encodeSettings(K_RECONNECT_AFTER_UPDATE, if (legacy) "1" else "0")
+        return legacy
+    }
 
 
     // ---------- red ----------

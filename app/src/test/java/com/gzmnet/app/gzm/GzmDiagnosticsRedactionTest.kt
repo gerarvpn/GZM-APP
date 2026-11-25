@@ -6,6 +6,16 @@ import org.junit.jupiter.api.Test
 
 class GzmDiagnosticsRedactionTest {
     @Test
+    fun `only app Xray VPN and connection errors are saved`() {
+        assertTrue(isGzmDiagnosticErrorPhase("Uncaught app error (main)"))
+        assertTrue(isGzmDiagnosticErrorPhase("Xray startup"))
+        assertTrue(isGzmDiagnosticErrorPhase("VPN tunnel setup"))
+        assertTrue(isGzmDiagnosticErrorPhase("Conexión"))
+        assertFalse(isGzmDiagnosticErrorPhase("Rendimiento"))
+        assertFalse(isGzmDiagnosticErrorPhase("VPN connection success"))
+    }
+
+    @Test
     fun `report redacts GZM tokens server links and credential values`() {
         val safe = GzmDiagnostics.redact(
             "GZM.abc_DEF token=secret vless://user:pass@example.com:443 and https://name:pass@example.com/error"

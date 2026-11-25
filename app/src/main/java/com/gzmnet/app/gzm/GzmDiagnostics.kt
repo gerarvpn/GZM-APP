@@ -9,7 +9,16 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Private, size-limited log containing only GZMNET application errors. */
+internal fun isGzmDiagnosticErrorPhase(phase: String): Boolean {
+    val normalized = phase.lowercase(Locale.ROOT)
+    return normalized.startsWith("uncaught app error") || normalized in setOf(
+        "xray startup", "vpn core startup", "queue vpn startup", "establish vpn interface",
+        "vpn setup", "vpn tunnel setup", "vpn start failure", "vpn startup timeout",
+        "conexión", "actualización", "descarga de actualización",
+    )
+}
+
+/** Private, bounded log of GZMNET, Xray and VPN-tunnel errors only. */
 object GzmDiagnostics {
     private const val FILE_NAME = "gzm_app_errors.log"
     private const val MAX_BYTES = 96 * 1024
@@ -17,6 +26,7 @@ object GzmDiagnostics {
     private val lock = Any()
 
     fun record(context: Context, phase: String, failure: Throwable) {
+        if (!isGzmDiagnosticErrorPhase(phase)) return
         val frames = generateSequence(failure) { it.cause }.take(3).flatMap { throwable ->
             sequenceOf("${throwable.javaClass.simpleName}: ${redact(throwable.message.orEmpty())}") +
                 throwable.stackTrace.asSequence().take(5).map { frame ->
@@ -27,15 +37,14 @@ object GzmDiagnostics {
     }
 
     fun recordMessage(context: Context, phase: String, message: String) {
+        if (!isGzmDiagnosticErrorPhase(phase)) return
         append(context, "[$phase] ${redact(message)}")
     }
 
-    fun count(context: Context): Int = synchronized(lock) {
-        runCatching { file(context).readLines().count { it.startsWith("--- ") } }.getOrDefault(0)
-    }
+    fun count(context: Context): Int = synchronized(lock) { errorEntries(context).size }
 
     fun report(context: Context): String = synchronized(lock) {
-        val entries = runCatching { file(context).readText() }.getOrDefault("").trim()
+        val entries = errorEntries(context).joinToString("\n").trim()
         buildString {
             appendLine("GZMNET — informe de errores de la app")
             appendLine("App: ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
@@ -57,6 +66,15 @@ object GzmDiagnostics {
         },
         "Compartir errores de GZMNET con el creador",
     )
+
+    private fun errorEntries(context: Context): List<String> = runCatching {
+        val content = file(context).readText()
+        Regex("(?m)(?=^--- )").split(content).filter { entry ->
+            val phaseLine = entry.lineSequence().firstOrNull { it.startsWith("[") }.orEmpty()
+            val phase = phaseLine.substringAfter("[").substringBefore("]", "")
+            isGzmDiagnosticErrorPhase(phase)
+        }
+    }.getOrDefault(emptyList())
 
     private fun append(context: Context, text: String) = synchronized(lock) {
         runCatching {

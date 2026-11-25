@@ -1,15 +1,13 @@
 package com.gzmnet.app
 
+import android.app.ActivityManager
 import android.app.Application
 import android.content.Context
+import android.os.Build
+import android.os.Process
 import androidx.core.content.ContextCompat
-import androidx.work.Configuration
-import androidx.work.WorkManager
-import com.gzmnet.app.AppConfig.ANG_PACKAGE
 import com.gzmnet.app.handler.AppLocaleManager
 import com.gzmnet.app.handler.MmkvManager
-import com.gzmnet.app.handler.SettingsManager
-import com.gzmnet.app.ui.compose.ThemeManager
 
 class AngApplication : Application() {
     private fun installGzmCrashLogger() {
@@ -33,10 +31,6 @@ class AngApplication : Application() {
         application = this
     }
 
-    private val workManagerConfiguration: Configuration = Configuration.Builder()
-        .setDefaultProcessName("${ANG_PACKAGE}:bg")
-        .build()
-
     /**
      * Initializes the application.
      */
@@ -48,13 +42,31 @@ class AngApplication : Application() {
 
         AppLocaleManager.initialize(this)
 
-        // Initialize WorkManager with the custom configuration
-        WorkManager.initialize(this, workManagerConfiguration)
+        // Keep application startup lightweight: presets/profile migrations and WorkManager
+        // initialization must not delay the first screen on slower Android TV hardware.
+        val backgroundBootstrap = Runnable {
+            runCatching { com.gzmnet.app.gzm.GzmWorkManagerRuntime.initialize(this) }
+            runCatching { com.gzmnet.app.gzm.GzmSettings.initializeAppSettings(this) }
+        }
+        if (isBackgroundWorkerProcess()) {
+            // WorkManager must be ready before Android instantiates a scheduled Worker.
+            backgroundBootstrap.run()
+        } else {
+            Thread(backgroundBootstrap, "gzm-background-bootstrap")
+                .apply { priority = Thread.NORM_PRIORITY - 1; start() }
+        }
 
-        // Ensure critical preference defaults are present in MMKV early
-        SettingsManager.initApp(this)
+        // GZM's entry screen uses a fixed local palette; avoid opening encrypted legacy theme
+        // settings on the application main thread before the first frame.
+    }
 
-        // Initialize theme state from MMKV
-        ThemeManager.refresh()
+    private fun isBackgroundWorkerProcess(): Boolean {
+        val processName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            Application.getProcessName()
+        } else {
+            val manager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+            manager?.runningAppProcesses?.firstOrNull { it.pid == Process.myPid() }?.processName
+        }
+        return processName == "${packageName}:bg"
     }
 }

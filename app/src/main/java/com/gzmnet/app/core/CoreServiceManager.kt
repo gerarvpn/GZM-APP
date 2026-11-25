@@ -9,7 +9,6 @@ import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.os.SystemClock
 import android.system.OsConstants
 import androidx.core.content.ContextCompat
 import com.gzmnet.app.AppConfig
@@ -134,12 +133,7 @@ object CoreServiceManager {
         val config = MmkvManager.decodeServerConfig(guid) ?: error("Failed to decode server config")
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
-        val configStartedAt = SystemClock.elapsedRealtime()
         val result = CoreConfigManager.getV2rayConfig(service, guid)
-        val configElapsed = SystemClock.elapsedRealtime() - configStartedAt
-        if (configElapsed >= 1_000L) {
-            GzmDiagnostics.recordMessage(service, "Rendimiento", "Preparar configuración del servidor tardó ${configElapsed} ms.")
-        }
         LogUtil.d(AppConfig.TAG, result.content)
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
@@ -161,12 +155,7 @@ object CoreServiceManager {
         if (dialerAddr.isNotNullEmpty()) {
             CoreNativeManager.reconcileBrowserDialer(dialerAddr)
         }
-        val coreStartedAt = SystemClock.elapsedRealtime()
         coreController.startLoop(result.content, tunFd)
-        val coreElapsed = SystemClock.elapsedRealtime() - coreStartedAt
-        if (coreElapsed >= 1_000L) {
-            GzmDiagnostics.recordMessage(service, "Rendimiento", "Arrancar el motor VPN tardó ${coreElapsed} ms.")
-        }
 
         if (!isRunning()) {
             error("Core failed to start")
@@ -220,6 +209,7 @@ object CoreServiceManager {
                     coreController.stopLoop()
                 } catch (e: Exception) {
                     LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to stop V2Ray loop", e)
+                    GzmDiagnostics.record(service, "Xray startup", e)
                 }
             }
         }
@@ -289,6 +279,7 @@ object CoreServiceManager {
         } catch (e: Exception) {
             val message = e.message?.takeUnless { it.isBlank() } ?: e.javaClass.simpleName
             LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to reload core: $message", e)
+            GzmDiagnostics.record(service, "Xray startup", e)
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_FAILURE, message)
             false
         } finally {
@@ -362,9 +353,6 @@ object CoreServiceManager {
             }
 
             ensureActive()
-            if (time < 0L) {
-                GzmDiagnostics.recordMessage(service, "Conexión", "La medición de salida del perfil no obtuvo respuesta en los dos destinos de prueba.")
-            }
             val initialResult = ConnectionTestResult(
                 delayMillis = time,
                 errorMessage = errorStr,
@@ -443,6 +431,10 @@ object CoreServiceManager {
          */
         override fun onEmitStatus(l: Long, s: String?): Long {
             LogUtil.i(AppConfig.TAG, "StartCore-Manager: CoreCallback onEmitStatus $s")
+            val status = s.orEmpty()
+            if (status.contains("error", ignoreCase = true) || status.contains("failed", ignoreCase = true) || status.contains("failure", ignoreCase = true)) {
+                CoreServiceManager.getService()?.let { GzmDiagnostics.recordMessage(it, "Xray startup", status) }
+            }
             return 0
         }
     }

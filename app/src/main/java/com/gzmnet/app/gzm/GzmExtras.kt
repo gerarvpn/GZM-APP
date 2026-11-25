@@ -38,6 +38,17 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 object GzmSettings {
+    @Volatile private var appSettingsReady = false
+
+    fun initializeAppSettings(context: Context) {
+        if (appSettingsReady) return
+        synchronized(this) {
+            if (appSettingsReady) return
+            SettingsManager.initApp(context.applicationContext)
+            appSettingsReady = true
+        }
+    }
+
     const val K_AUTO_WIFI = "gzm_auto_wifi"
     const val K_AUTO_MOBILE = "gzm_auto_mobile"
 
@@ -136,6 +147,7 @@ object GzmAuto {
     fun apply(ctx: Context) {
         val app = ctx.applicationContext
         try {
+            GzmSettings.initializeAppSettings(app)
             val cm = app.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val enabled = GzmSettings.bool(GzmSettings.K_AUTO_WIFI) || GzmSettings.bool(GzmSettings.K_AUTO_MOBILE)
             val req = NetworkRequest.Builder()
@@ -232,6 +244,7 @@ class GzmBootReceiver : BroadcastReceiver() {
         val pr = goAsync()
         thread {
             try {
+                GzmSettings.initializeAppSettings(context.applicationContext)
                 GzmAuto.apply(context.applicationContext)
                 if (GzmPanel.hasToken()) GzmSyncWorker.schedule(context.applicationContext)
                 if (a == Intent.ACTION_MY_PACKAGE_REPLACED && GzmPanel.reconnectAfterUpdate()) {

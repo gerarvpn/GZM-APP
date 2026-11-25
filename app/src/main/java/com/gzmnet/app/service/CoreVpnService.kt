@@ -53,6 +53,7 @@ class CoreVpnService : VpnService(), ServiceControl {
 
     override fun onRevoke() {
         LogUtil.w(AppConfig.TAG, "StartCore-VPN: Permission revoked")
+        GzmDiagnostics.recordMessage(this, "VPN setup", "Android revocó el permiso del túnel VPN.")
         stopAllService()
     }
 
@@ -125,6 +126,7 @@ class CoreVpnService : VpnService(), ServiceControl {
                     }
                     if (!CoreServiceManager.startCoreLoop(mInterface)) {
                         LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
+                        GzmDiagnostics.recordMessage(this@CoreVpnService, "Xray startup", "Xray no pudo iniciar el core loop.")
                         stopAllService()
                         return@execute
                     }
@@ -182,18 +184,12 @@ class CoreVpnService : VpnService(), ServiceControl {
             return false
         }
 
-        val vpnSetupStartedAt = android.os.SystemClock.elapsedRealtime()
         if (configureVpnService() != true) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Configuration failed")
-            GzmDiagnostics.recordMessage(this, "Rendimiento", "Configurar la interfaz VPN falló tras ${android.os.SystemClock.elapsedRealtime() - vpnSetupStartedAt} ms.")
+            GzmDiagnostics.recordMessage(this, "VPN tunnel setup", "Android no pudo configurar la interfaz VPN.")
             return false
         }
-        val interfaceSetupMs = android.os.SystemClock.elapsedRealtime() - vpnSetupStartedAt
-        if (interfaceSetupMs >= 1_000L) {
-            GzmDiagnostics.recordMessage(this, "Rendimiento", "Crear la interfaz VPN tardó ${interfaceSetupMs} ms.")
-        }
 
-        val bridgeStartedAt = android.os.SystemClock.elapsedRealtime()
         if (!runTun2socks()) {
             LogUtil.e(AppConfig.TAG, "VPN/HEV: tun2socks did not start; refusing to report a connected but non-forwarding VPN")
             GzmDiagnostics.recordMessage(this, "VPN tunnel setup", "El puente del túnel de tráfico no pudo iniciarse.")
@@ -204,10 +200,6 @@ class CoreVpnService : VpnService(), ServiceControl {
             )
             stopAllService()
             return false
-        }
-        val bridgeElapsedMs = android.os.SystemClock.elapsedRealtime() - bridgeStartedAt
-        if (bridgeElapsedMs >= 1_000L) {
-            GzmDiagnostics.recordMessage(this, "Rendimiento", "Preparar el puente de tráfico VPN tardó ${bridgeElapsedMs} ms.")
         }
         return true
     }

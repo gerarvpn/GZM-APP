@@ -1,6 +1,7 @@
 package com.gzmnet.app.gzm
 
 import android.content.Context
+import androidx.work.Configuration
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -9,6 +10,23 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
+import com.gzmnet.app.AppConfig
+
+object GzmWorkManagerRuntime {
+    @Volatile private var initialized = false
+
+    fun initialize(context: Context) {
+        if (initialized) return
+        synchronized(this) {
+            if (initialized) return
+            WorkManager.initialize(
+                context.applicationContext,
+                Configuration.Builder().setDefaultProcessName("${AppConfig.ANG_PACKAGE}:bg").build(),
+            )
+            initialized = true
+        }
+    }
+}
 
 /** Revisa el estado en segundo plano cuando hay internet; si el cliente fue desactivado, corta la VPN. */
 class GzmSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
@@ -22,6 +40,7 @@ class GzmSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
 
     companion object {
         fun schedule(ctx: Context) {
+            GzmWorkManagerRuntime.initialize(ctx)
             val req = PeriodicWorkRequestBuilder<GzmSyncWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build()
