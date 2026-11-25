@@ -18,8 +18,8 @@ android {
         // runner-generated debug keys, so Android cannot update those in place. This ID can now
         // keep one stable signing identity for all future in-app updates.
         applicationId = "com.gzmnet.gzmapp"
-        // Include older Android TV boxes (Marshmallow/API 23) in the universal build.
-        minSdk = 23
+        // The bundled Xray Android library requires API 24 (Android 7.0) or newer.
+        minSdk = 24
         targetSdk = 37
         versionCode = 760
         versionName = "1.0"
@@ -55,7 +55,7 @@ android {
             storeFile = file(storePath)
             storeType = "pkcs12"
             storePassword = password
-            // Keep JAR/v1 signing for older Android TV package installers as well as modern v2.
+            // Keep both JAR/v1 and v2 signatures for broad Android package-installer support.
             enableV1Signing = true
             enableV2Signing = true
             keyAlias = "gzmnet"
