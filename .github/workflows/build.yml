@@ -77,6 +77,8 @@ jobs:
 
       - name: Probar lógica crítica y compilar
         shell: bash
+        env:
+          GZMNET_SIGNING_PASSWORD: ${{ secrets.GZMNET_SIGNING_PASSWORD }}
         run: |
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
