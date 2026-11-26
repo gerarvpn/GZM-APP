@@ -39,6 +39,20 @@ class GzmUpdateBuildTest {
     }
 
     @Test
+    fun `only binds update requests to non VPN networks that have internet`() {
+        assertEquals(false, canUseGzmPhysicalNetwork(isVpn = true, hasInternet = true))
+        assertEquals(false, canUseGzmPhysicalNetwork(isVpn = false, hasInternet = false))
+        assertEquals(true, canUseGzmPhysicalNetwork(isVpn = false, hasInternet = true))
+    }
+
+    @Test
+    fun `prefers validated internet and then wifi ethernet over cellular`() {
+        assertEquals(105, gzmNetworkPreferenceScore(isValidated = true, isWifiOrEthernet = false, isCellular = true))
+        assertEquals(110, gzmNetworkPreferenceScore(isValidated = true, isWifiOrEthernet = true, isCellular = false))
+        assertEquals(5, gzmNetworkPreferenceScore(isValidated = false, isWifiOrEthernet = false, isCellular = true))
+    }
+
+    @Test
     fun `accepts only zip based apk header`() {
         assertEquals(true, isGzmApkZipHeader(byteArrayOf(0x50, 0x4b, 0x03, 0x04)))
         assertEquals(false, isGzmApkZipHeader("<html".toByteArray()))

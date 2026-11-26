@@ -246,11 +246,18 @@ object CoreServiceManager {
         if (networkMonitor != null) return
 
         val connectivity = service.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
-        networkMonitor = NetworkMonitor(
+        lateinit var monitor: NetworkMonitor
+        monitor = NetworkMonitor(
             connectivity = connectivity,
             onUnderlyingNetworksChanged = { networks -> serviceControl?.get()?.setUnderlyingNetworks(networks) },
-            onHandover = { reloadCore() },
-        ).also { it.register() }
+            onHandover = {
+                if (shouldRunNetworkHandover(isCurrentMonitor = networkMonitor === monitor, coreRunning = isRunning())) {
+                    reloadCore()
+                }
+            },
+        )
+        networkMonitor = monitor
+        monitor.register()
     }
 
     /**

@@ -522,7 +522,7 @@ fun checkUpdate() {
 if (_ui.value.updBusy) return
 viewModelScope.launch {
 _ui.update { it.copy(updBusy = true, updText = "Buscando…", updAvailable = false) }
-val rel = GzmUpdate.latest()
+val rel = GzmUpdate.latest(getApplication())
 _ui.update {
 when {
 rel == null -> {

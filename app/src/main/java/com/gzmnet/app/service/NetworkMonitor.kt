@@ -11,6 +11,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 
 /**
@@ -23,6 +25,10 @@ import kotlinx.coroutines.launch
  * Only used from Android P and above, see CoreServiceManager.startNetworkMonitor().
  * [onHandover] is invoked on a background thread after the debounce window and may block.
  */
+internal fun shouldAcceptUnderlyingNetwork(isVpn: Boolean, hasInternet: Boolean): Boolean = !isVpn && hasInternet
+internal fun shouldClearLostUpstream(lostIsCurrent: Boolean): Boolean = lostIsCurrent
+internal fun shouldRunNetworkHandover(isCurrentMonitor: Boolean, coreRunning: Boolean): Boolean = isCurrentMonitor && coreRunning
+
 class NetworkMonitor(
     private val connectivity: ConnectivityManager,
     private val onUnderlyingNetworksChanged: (Array<Network>?) -> Unit,
@@ -32,9 +38,10 @@ class NetworkMonitor(
         const val HANDOVER_DEBOUNCE_MS = 1000L
     }
 
-    private var upstream: Network? = null
+    @Volatile private var upstream: Network? = null
     private var handoverJob: Job? = null
-    private var registered = false
+    @Volatile private var registered = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Unfortunately registerDefaultNetworkCallback is going to return our VPN interface:
@@ -50,26 +57,42 @@ class NetworkMonitor(
         NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+            // Never let the VPN interface itself be selected as its own physical upstream.
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
             .build()
     }
 
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
+            val caps = connectivity.getNetworkCapabilities(network) ?: return
+            if (!shouldAcceptUnderlyingNetwork(
+                    isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                    hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                )) return
             val previous = upstream
             upstream = network
             onUnderlyingNetworksChanged(arrayOf(network))
-            if (previous != null && previous != network) {
-                scheduleHandover(network)
-            }
+            if (previous != null && previous != network) scheduleHandover(network)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            // it's a good idea to refresh capabilities
+            if (network != upstream) return
+            if (!shouldAcceptUnderlyingNetwork(
+                    isVpn = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                    hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                )) {
+                upstream = null
+                onUnderlyingNetworksChanged(null)
+                return
+            }
             onUnderlyingNetworksChanged(arrayOf(network))
         }
 
         override fun onLost(network: Network) {
-            onUnderlyingNetworksChanged(null)
+            if (shouldClearLostUpstream(network == upstream)) {
+                upstream = null
+                onUnderlyingNetworksChanged(null)
+            }
         }
     }
 
@@ -90,11 +113,13 @@ class NetworkMonitor(
      * Stops watching and drops the tracked state. Safe to call more than once.
      */
     fun unregister() {
+        val wasRegistered = registered
+        registered = false
         handoverJob?.cancel()
         handoverJob = null
+        scope.coroutineContext.cancelChildren()
         upstream = null
-        if (!registered) return
-        registered = false
+        if (!wasRegistered) return
         try {
             connectivity.unregisterNetworkCallback(callback)
         } catch (e: Exception) {
@@ -105,10 +130,10 @@ class NetworkMonitor(
     private fun scheduleHandover(network: Network) {
         LogUtil.i(AppConfig.TAG, "NetworkMonitor: Upstream is now $network")
         handoverJob?.cancel()
-        handoverJob = CoroutineScope(Dispatchers.IO).launch {
+        handoverJob = scope.launch {
             try {
                 delay(HANDOVER_DEBOUNCE_MS)
-                onHandover()
+                if (registered && upstream == network) onHandover()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -288,6 +288,12 @@ internal fun isGzmApkZipHeader(header: ByteArray): Boolean =
             (header[2] == 0x05.toByte() && header[3] == 0x06.toByte()) ||
             (header[2] == 0x07.toByte() && header[3] == 0x08.toByte()))
 
+internal fun canUseGzmPhysicalNetwork(isVpn: Boolean, hasInternet: Boolean): Boolean =
+    !isVpn && hasInternet
+
+internal fun gzmNetworkPreferenceScore(isValidated: Boolean, isWifiOrEthernet: Boolean, isCellular: Boolean): Int =
+    (if (isValidated) 100 else 0) + (if (isWifiOrEthernet) 10 else 0) + (if (isCellular) 5 else 0)
+
 /** Actualización desde la propia app, usando el último Release de GitHub. */
 object GzmUpdate {
     private const val REPO = "gerarvpn/GZM-APP"
@@ -306,11 +312,40 @@ object GzmUpdate {
     fun currentBuild(): Int = BuildConfig.VERSION_CODE % 1_000_000
     fun currentName(): String = BuildConfig.VERSION_NAME
 
+    private fun openConnection(context: Context, url: URL): HttpURLConnection {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (connectivity != null) {
+            val candidates = runCatching { connectivity.allNetworks.toList() }.getOrDefault(emptyList())
+            val active = runCatching { connectivity.activeNetwork }.getOrNull()
+            fun score(network: Network): Int? {
+                val caps = runCatching { connectivity.getNetworkCapabilities(network) }.getOrNull() ?: return null
+                if (!canUseGzmPhysicalNetwork(
+                        isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                        hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+                    )) return null
+                return gzmNetworkPreferenceScore(
+                    isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                    isWifiOrEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                    isCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+                )
+            }
+            val selected = active?.takeIf { score(it) != null }
+                ?: candidates.mapNotNull { network -> score(network)?.let { network to it } }
+                    .maxByOrNull { it.second }?.first
+            if (selected != null) return selected.openConnection(url) as HttpURLConnection
+            val activeIsVpn = active?.let { network ->
+                runCatching { connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }.getOrDefault(false)
+            } == true
+            if (activeIsVpn) throw java.io.IOException("No se encontró una red física con internet para la actualización.")
+        }
+        return url.openConnection() as HttpURLConnection
+    }
+
     /** null = no se pudo consultar. */
-    suspend fun latest(): GzmRelease? = withContext(Dispatchers.IO) {
+    suspend fun latest(context: Context): GzmRelease? = withContext(Dispatchers.IO) {
         var connection: HttpURLConnection? = null
         try {
-            connection = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
+            connection = openConnection(context.applicationContext, URL("https://api.github.com/repos/$REPO/releases/latest"))
             connection.connectTimeout = 10000
             connection.readTimeout = 12000
             connection.setRequestProperty("Accept", "application/vnd.github+json")
@@ -352,7 +387,7 @@ object GzmUpdate {
             // Keep only the current attempt's partial; clear an older APK before starting a new one.
             partial.delete()
             target.delete()
-            connection = URL("$APK_URL?gzm_build=$id").openConnection() as HttpURLConnection
+            connection = openConnection(context, URL("$APK_URL?gzm_build=$id"))
             connection.connectTimeout = 20000
             connection.readTimeout = 45000
             connection.instanceFollowRedirects = true
