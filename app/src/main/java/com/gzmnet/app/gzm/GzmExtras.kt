@@ -308,6 +308,9 @@ object GzmUpdate {
 
     private val nextDownloadId = AtomicLong(System.currentTimeMillis())
     private val downloads = ConcurrentHashMap<Long, DownloadState>()
+    @Volatile private var latestFailure: String? = null
+
+    fun latestFailure(): String? = latestFailure
 
     fun currentBuild(): Int = BuildConfig.VERSION_CODE % 1_000_000
     fun currentName(): String = BuildConfig.VERSION_NAME
@@ -343,6 +346,7 @@ object GzmUpdate {
 
     /** null = no se pudo consultar. */
     suspend fun latest(context: Context): GzmRelease? = withContext(Dispatchers.IO) {
+        latestFailure = null
         var connection: HttpURLConnection? = null
         try {
             connection = openConnection(context.applicationContext, URL("https://api.github.com/repos/$REPO/releases/latest"))
@@ -350,12 +354,19 @@ object GzmUpdate {
             connection.readTimeout = 12000
             connection.setRequestProperty("Accept", "application/vnd.github+json")
             connection.setRequestProperty("User-Agent", "GZMNET-App")
-            if (connection.responseCode != 200) return@withContext null
+            if (connection.responseCode != 200) {
+                latestFailure = "GitHub respondió HTTP ${connection.responseCode}."
+                return@withContext null
+            }
             val o = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
             val name = o.optString("name")
-            val b = parseGzmReleaseBuild(name) ?: return@withContext null
+            val b = parseGzmReleaseBuild(name) ?: run {
+                latestFailure = "GitHub respondió, pero el nombre de la versión no contiene el número de build."
+                return@withContext null
+            }
             GzmRelease(b, name)
         } catch (e: Exception) {
+            latestFailure = gzmUpdateFailureSummary(e)
             null
         } finally {
             connection?.disconnect()

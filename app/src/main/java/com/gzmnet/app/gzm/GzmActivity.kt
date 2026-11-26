@@ -110,19 +110,24 @@ import java.util.Locale
 internal fun isPanelOfflineAfterFailures(failures: Int): Boolean = failures >= 2
 
 internal fun shouldSendGzmPing(force: Boolean, hasPending: Boolean, pendingAgeMs: Long, sinceLastRequestMs: Long): Boolean =
-    (force || !hasPending || pendingAgeMs >= 25_000L) && (force || sinceLastRequestMs >= 10_000L)
+    (!hasPending || pendingAgeMs >= 25_000L) && (force || sinceLastRequestMs >= 10_000L)
 
 internal const val GZM_STARTUP_TIMEOUT_MS = 90_000L
 internal fun hasGzmStartupTimedOut(startedAtMs: Long, nowMs: Long): Boolean =
     nowMs - startedAtMs >= GZM_STARTUP_TIMEOUT_MS
 internal fun isGzmConnectionProbeFailure(delayMillis: Long): Boolean = delayMillis < 0L
 
+internal fun gzmPingRetryDelayMs(failureCount: Int, pipeClosed: Boolean): Long =
+    if (pipeClosed) 60_000L else (30_000L shl (failureCount.coerceAtLeast(1) - 1).coerceAtMost(2)).coerceAtMost(120_000L)
+
 internal fun gzmStartupTimeoutDetail(phase: String): String =
     "El túnel no confirmó el inicio en 90 segundos. Última fase: ${phase.ifBlank { "esperando respuesta del servicio VPN" }}."
 
-internal fun gzmAccountNotice(message: String?, expiry: String?, today: java.time.LocalDate): String? {
-    val genericStatusMessages = setOf("activo", "activa", "active", "vencido", "vencida", "expired", "desactivado", "desactivada", "disabled", "sin cupo de datos", "límite de dispositivos", "limite de dispositivos", "sin servidores disponibles")
-    val cleanMessage = message?.trim()?.takeIf { it.isNotEmpty() && it.lowercase(Locale.ROOT).trimEnd('.', '!', ' ') !in genericStatusMessages }
+internal fun gzmAccountNotice(message: String?, title: String?, expiry: String?, today: java.time.LocalDate): String? {
+    val genericStatusMessages = setOf("activo", "activa", "active", "vencido", "vencida", "expired", "desactivado", "desactivada", "disabled", "cuenta activa", "cuenta está activa", "account active", "account is active", "sin cupo de datos", "límite de dispositivos", "limite de dispositivos", "sin servidores disponibles")
+    val cleanMessages = listOfNotNull(title, message).map { it.trim() }
+        .filter { it.isNotEmpty() && it.lowercase(Locale.ROOT).trimEnd('.', '!', ' ') !in genericStatusMessages }
+        .distinct()
     val expiryDate = expiry?.trim()?.take(10)?.let { raw ->
         runCatching { java.time.LocalDate.parse(raw) }.getOrNull()
             ?: runCatching { java.time.LocalDate.parse(raw, java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu", Locale.US)) }.getOrNull()
@@ -135,7 +140,7 @@ internal fun gzmAccountNotice(message: String?, expiry: String?, today: java.tim
         days in 1L..3L -> "Tu pago o renovación vence en $days día${if (days == 1L) "" else "s"}."
         else -> null
     }
-    return listOfNotNull(cleanMessage, dueNotice).joinToString("\n").ifBlank { null }
+    return (cleanMessages + listOfNotNull(dueNotice)).joinToString("\n").ifBlank { null }
 }
 
 data class GzmUi(
@@ -186,6 +191,9 @@ private val panelSyncMutex = Mutex()
 @Volatile private var panelFailureCount = 0
 @Volatile private var pingPendingId = ""
 @Volatile private var lastPingRequestAt = 0L
+@Volatile private var pingRetryAfterAt = 0L
+@Volatile private var pingFailureCount = 0
+@Volatile private var lastPingDiagnosticAt = 0L
 @Volatile private var activityVisible = false
 private val receiver = object : BroadcastReceiver() {
 override fun onReceive(context: Context?, intent: Intent?) {
@@ -206,24 +214,43 @@ val result = intent?.getSerializableExtra("content") as? ConnectionTestResult
 if (requestId == pingPendingId && result != null) {
 pingPendingId = ""
 if (isGzmConnectionProbeFailure(result.delayMillis)) {
-GzmDiagnostics.recordMessage(app, "Conexión", "El túnel arrancó, pero la prueba del servidor no respondió: ${result.errorMessage}")
-_ui.update { it.copy(serverPingMs = null, error = "La VPN está activa, pero el servidor no respondió a la prueba. Revisa la conexión y vuelve a probar.") }
+val pipeClosed = isGzmCorePipeClosed(result.errorMessage)
+pingFailureCount = (pingFailureCount + 1).coerceAtMost(4)
+pingRetryAfterAt = System.currentTimeMillis() + gzmPingRetryDelayMs(pingFailureCount, pipeClosed)
+if (!pipeClosed && System.currentTimeMillis() - lastPingDiagnosticAt >= 5 * 60_000L) {
+lastPingDiagnosticAt = System.currentTimeMillis()
+GzmDiagnostics.recordMessage(app, "Conexión", "La VPN sigue activa, pero el sondeo de latencia falló (${result.errorMessage.ifBlank { "sin respuesta" }}). Se reintentará más tarde.")
+}
+_ui.update { it.copy(serverPingMs = null, error = if (it.error?.startsWith("La VPN está activa") == true) null else it.error) }
 } else {
+pingFailureCount = 0
+pingRetryAfterAt = 0L
 _ui.update { it.copy(serverPingMs = result.delayMillis, error = if (it.error?.startsWith("La VPN está activa") == true) null else it.error) }
 }
 }
 }
 AppConfig.MSG_MEASURE_DELAY_CANCEL -> {
-if (intent?.getStringExtra(EXTRA_REQUEST_ID).orEmpty() == pingPendingId) pingPendingId = ""
+if (intent?.getStringExtra(EXTRA_REQUEST_ID).orEmpty() == pingPendingId) {
+pingPendingId = ""
+pingRetryAfterAt = maxOf(pingRetryAfterAt, System.currentTimeMillis() + 10_000L)
+}
 }
 AppConfig.MSG_STATE_RUNNING -> markRunning()
 AppConfig.MSG_STATE_START_SUCCESS -> {
 // Ignore a late startup callback after the user cancelled or the startup watchdog expired.
 if (_ui.value.starting) markRunning()
 }
-AppConfig.MSG_STATE_NOT_RUNNING, AppConfig.MSG_STATE_STOP_SUCCESS -> {
+AppConfig.MSG_STATE_NOT_RUNNING -> {
+if (!_ui.value.starting) {
 startupPhaseForDiagnostic = ""
-_ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) }
+pingPendingId = ""
+_ui.update { it.copy(running = false, serverPingMs = null, appRateUp = 0, appRateDown = 0) }
+}
+}
+AppConfig.MSG_STATE_STOP_SUCCESS -> {
+startupPhaseForDiagnostic = ""
+pingPendingId = ""
+_ui.update { it.copy(running = false, starting = false, serverPingMs = null, appRateUp = 0, appRateDown = 0) }
 }
 AppConfig.MSG_STATE_START_FAILURE -> {
 val detail = intent?.getStringExtra("content")?.trim().orEmpty()
@@ -389,9 +416,17 @@ panelSyncMutex.unlock()
 }
 fun setActivityVisible(visible: Boolean) {
 activityVisible = visible
-_ui.update { if (visible) it else it.copy(appRateUp = 0, appRateDown = 0) }
-MessageHelper.sendMsg2Service(getApplication(), if (visible) AppConfig.MSG_GZM_TRAFFIC_START else AppConfig.MSG_GZM_TRAFFIC_STOP, "")
-if (visible && _ui.value.running) requestServerPingIfDue(force = true)
+if (!visible) pingPendingId = ""
+_ui.update { current ->
+if (visible) current.copy(running = false, serverPingMs = null, appRateUp = 0, appRateDown = 0)
+else current.copy(appRateUp = 0, appRateDown = 0)
+}
+if (visible) {
+// Ask the daemon for its real state first. A cached UI flag is not proof that its pipe/core is alive.
+MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_REGISTER_CLIENT, "")
+} else {
+MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_STOP, "")
+}
 }
 fun onNetworkAvailable() {
 if (activityVisible) {
@@ -401,6 +436,7 @@ if (GzmPanel.hasToken() && GzmPanel.configRefreshDue(_ui.value.status?.configInt
 private fun requestServerPingIfDue(force: Boolean = false) {
 if (!activityVisible || !_ui.value.running) return
 val now = System.currentTimeMillis()
+if (now < pingRetryAfterAt) return
 val hasPending = pingPendingId.isNotEmpty()
 val pendingAge = if (hasPending) now - lastPingRequestAt else Long.MAX_VALUE
 val sinceLastRequest = if (lastPingRequestAt == 0L) Long.MAX_VALUE else now - lastPingRequestAt
@@ -533,8 +569,9 @@ val rel = GzmUpdate.latest(getApplication())
 _ui.update {
 when {
 rel == null -> {
-GzmDiagnostics.recordMessage(getApplication(), "Actualización", "No se pudo consultar la actualización en GitHub.")
-it.copy(updBusy = false, updText = "No se pudo comprobar. Revisa tu internet o la conexión de la VPN.")
+val reason = GzmUpdate.latestFailure()?.takeIf { it.isNotBlank() } ?: "GitHub no devolvió información de versión."
+GzmDiagnostics.recordMessage(getApplication(), "Actualización", "No se pudo consultar GitHub: $reason")
+it.copy(updBusy = false, updText = "No se pudo comprobar: $reason")
 }
 rel.build > GzmUpdate.currentBuild() -> it.copy(updBusy = false, updAvailable = true, updText = "Nueva versión disponible: ${rel.name}")
 else -> it.copy(updBusy = false, updText = "Ya tienes la última versión")
@@ -831,19 +868,7 @@ else -> "Toca para conectar"
 fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
 color = if (ui.running) Green else if (blocked) Red else Color.White
 )
-val accountNotice = gzmAccountNotice(st?.message, st?.expiry, java.time.LocalDate.now())
-if (ui.hasToken && st != null) {
-Spacer(Modifier.height(12.dp))
-Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Blue.copy(alpha = .16f)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-Text("Cliente", color = Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-Spacer(Modifier.height(4.dp))
-Text(st.name.ifBlank { "Cuenta GZMNET" }, color = Blue, fontWeight = FontWeight.Bold, fontSize = 16.sp, textAlign = TextAlign.Center)
-if (!accountNotice.isNullOrBlank()) {
-Spacer(Modifier.height(6.dp))
-Text(accountNotice, color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
-}
-}
-}
+val accountNotice = gzmAccountNotice(st?.message, st?.title, st?.expiry, java.time.LocalDate.now())
 if (!ui.offline && !ui.error.isNullOrBlank()) {
 Spacer(Modifier.height(8.dp))
 Text(ui.error, modifier = Modifier.fillMaxWidth(), color = Red, fontSize = 12.sp, textAlign = TextAlign.Center)
@@ -857,27 +882,16 @@ Text("Contacta a tu proveedor para renovar o reactivar tu cuenta.", color = Mute
 Spacer(Modifier.height(14.dp))
 }
 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Card).padding(18.dp)) {
-val (label, color) = when (st?.state) {
-"active" -> "Activo" to Green
-"expired" -> "Vencido" to Red
-"disabled" -> "Desactivado" to Red
-"exhausted" -> "Sin cupo de datos" to Red
-"device_limit" -> "Límite de dispositivos" to Red
-"no_servers" -> "Sin servidores disponibles" to Amber
-else -> "Sin verificar" to Amber
+Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Blue.copy(alpha = .14f)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+Text("Cliente", color = Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+Spacer(Modifier.height(4.dp))
+Text(st?.name?.ifBlank { "Cuenta GZMNET" } ?: "Cuenta GZMNET", color = Blue, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
+if (!accountNotice.isNullOrBlank()) {
+Spacer(Modifier.height(6.dp))
+Text(accountNotice, color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
 }
-Row(verticalAlignment = Alignment.CenterVertically) {
-Box(Modifier.size(10.dp).clip(CircleShape).background(color))
-Spacer(Modifier.size(8.dp))
-Text(label, fontWeight = FontWeight.SemiBold, color = color, modifier = Modifier.weight(1f))
-
 }
 Spacer(Modifier.height(14.dp))
-Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-Text("Cliente", color = Muted, fontSize = 11.sp)
-Spacer(Modifier.height(3.dp))
-Text(st?.name?.ifBlank { "Cuenta GZMNET" } ?: "Cuenta GZMNET", color = Blue, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
-}
 InfoRow("Vence", st?.expiry?.ifBlank { "Sin vencimiento" } ?: "—")
 Spacer(Modifier.height(10.dp))
 val limit = st?.limitBytes ?: 0L

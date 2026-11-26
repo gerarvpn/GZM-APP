@@ -25,6 +25,8 @@ import com.gzmnet.app.handler.NotificationManager
 import com.gzmnet.app.handler.SettingsManager
 import com.gzmnet.app.handler.SpeedtestManager
 import com.gzmnet.app.gzm.GzmDiagnostics
+import com.gzmnet.app.gzm.isGzmCorePipeClosed
+import com.gzmnet.app.gzm.shouldTryAlternateGzmPing
 import com.gzmnet.app.helper.MessageHelper
 import com.gzmnet.app.service.DialerNativeService
 import com.gzmnet.app.service.DialerWebviewService
@@ -35,6 +37,7 @@ import com.gzmnet.app.util.Utils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.ensureActive
@@ -55,6 +58,7 @@ object CoreServiceManager {
     private var browserDialer: IDialerService? = null
     private var networkMonitor: NetworkMonitor? = null
     private val connectionTestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var connectionDelayJob: Job? = null
 
     @Volatile
     private var isReloading = false
@@ -342,24 +346,45 @@ object CoreServiceManager {
             return
         }
 
-        connectionTestScope.coroutineContext.cancelChildren()
-        connectionTestScope.launch {
+        if (connectionDelayJob?.isActive == true) {
+            // Never cancel an in-flight native measurement just because the UI came back or
+            // requested another sample; closing its RPC pipe caused the reported EOF/closed-pipe.
+            MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
+            return
+        }
+        val delayJob = connectionTestScope.launch {
             var time = -1L
             var errorStr = ""
 
             try {
                 time = coreController.measureDelay(SettingsManager.getDelayTestUrl())
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to measure delay", e)
-                errorStr = e.message?.substringAfter("\":").orEmpty()
+                errorStr = e.message?.substringAfter("\":").orEmpty().ifBlank { e.message.orEmpty() }
+                val coreStillRunning = isRunning()
+                if (isGzmCorePipeClosed(errorStr) || !coreStillRunning) {
+                    withContext(Dispatchers.Main.immediate) {
+                        if (!coreStillRunning) MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_NOT_RUNNING, "")
+                        MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
+                    }
+                    return@launch
+                }
+                LogUtil.w(AppConfig.TAG, "StartCore-Manager: primary ping probe failed; trying fallback: ${e.javaClass.simpleName}")
             }
-            if (time == -1L) {
+            if (time == -1L && shouldTryAlternateGzmPing(errorStr, coreRunning = isRunning())) {
                 ensureActive()
                 try {
                     time = coreController.measureDelay(SettingsManager.getDelayTestUrl(true))
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "StartCore-Manager: Failed to measure delay", e)
-                    errorStr = e.message?.substringAfter("\":").orEmpty()
+                    errorStr = e.message?.substringAfter("\":").orEmpty().ifBlank { e.message.orEmpty() }
+                    val coreStillRunning = isRunning()
+                    if (isGzmCorePipeClosed(errorStr) || !coreStillRunning) {
+                        withContext(Dispatchers.Main.immediate) {
+                            if (!coreStillRunning) MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_NOT_RUNNING, "")
+                            MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
+                        }
+                        return@launch
+                    }
+                    LogUtil.w(AppConfig.TAG, "StartCore-Manager: fallback ping probe failed: ${e.javaClass.simpleName}")
                 }
             }
 
@@ -396,7 +421,10 @@ object CoreServiceManager {
                     }
                 }
             }
-        }.invokeOnCompletion { cause ->
+        }
+        connectionDelayJob = delayJob
+        delayJob.invokeOnCompletion { cause ->
+            if (connectionDelayJob === delayJob) connectionDelayJob = null
             if (cause is CancellationException) {
                 MessageHelper.sendMsg2UI(service, AppConfig.MSG_MEASURE_DELAY_CANCEL, "", requestId)
             }

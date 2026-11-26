@@ -8,11 +8,12 @@ class GzmProfileSelectionTest {
     @Test
     fun `account notice includes panel message and warns within three days of renewal`() {
         val today = java.time.LocalDate.of(2026, 11, 25)
-        assertEquals("Vence pronto\nTu pago o renovación vence en 2 días.", gzmAccountNotice("Vence pronto", "2026-11-27", today))
-        assertEquals("Tu pago o renovación vence hoy.", gzmAccountNotice(null, "25/11/2026", today))
-        assertEquals("Tu mensaje\nTu pago o renovación vence hoy.", gzmAccountNotice("Tu mensaje", "25/11/2026", today))
-        assertEquals(null, gzmAccountNotice(null, "2026-12-01", today))
-        assertEquals(null, gzmAccountNotice("Activo", "2026-12-01", today))
+        assertEquals("Vence pronto\nTu pago o renovación vence en 2 días.", gzmAccountNotice("Vence pronto", null, "2026-11-27", today))
+        assertEquals("Tu pago o renovación vence hoy.", gzmAccountNotice(null, null, "25/11/2026", today))
+        assertEquals("Tu mensaje\nTu pago o renovación vence hoy.", gzmAccountNotice(null, "Tu mensaje", "25/11/2026", today))
+        assertEquals("Aviso de proveedor", gzmAccountNotice("Activo", "Aviso de proveedor", "2026-12-01", today))
+        assertEquals(null, gzmAccountNotice(null, null, "2026-12-01", today))
+        assertEquals(null, gzmAccountNotice("Activo", "Cuenta activa", "2026-12-01", today))
     }
 
     @Test

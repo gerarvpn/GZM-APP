@@ -39,6 +39,13 @@ class GzmUpdateBuildTest {
     }
 
     @Test
+    fun `reports useful categories for update connectivity failures`() {
+        assertEquals("No se resolvió el servidor de actualización (DNS/red móvil).", gzmUpdateFailureSummary(java.net.UnknownHostException("host")))
+        assertEquals("La red tardó demasiado al consultar GitHub.", gzmUpdateFailureSummary(java.net.SocketTimeoutException("timeout")))
+        assertEquals(true, gzmUpdateFailureSummary(java.io.IOException("offline")).contains("IOException"))
+    }
+
+    @Test
     fun `only binds update requests to non VPN networks that have internet`() {
         assertEquals(false, canUseGzmPhysicalNetwork(isVpn = true, hasInternet = true))
         assertEquals(false, canUseGzmPhysicalNetwork(isVpn = false, hasInternet = false))
