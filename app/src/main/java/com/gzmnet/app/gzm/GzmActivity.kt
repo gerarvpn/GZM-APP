@@ -120,14 +120,9 @@ internal fun isGzmConnectionProbeFailure(delayMillis: Long): Boolean = delayMill
 internal fun gzmStartupTimeoutDetail(phase: String): String =
     "El túnel no confirmó el inicio en 90 segundos. Última fase: ${phase.ifBlank { "esperando respuesta del servicio VPN" }}."
 
-internal fun gzmSubscriptionAccent(state: String?): String = when (state) {
-    "disabled", "inactive", "expired" -> "red"
-    "exhausted", "device_limit", "no_servers" -> "yellow"
-    else -> "blue"
-}
-
 internal fun gzmAccountNotice(message: String?, expiry: String?, today: java.time.LocalDate): String? {
-    val cleanMessage = message?.trim()?.takeIf { it.isNotEmpty() }
+    val genericStatusMessages = setOf("activo", "activa", "active", "vencido", "vencida", "expired", "desactivado", "desactivada", "disabled", "sin cupo de datos", "límite de dispositivos", "limite de dispositivos", "sin servidores disponibles")
+    val cleanMessage = message?.trim()?.takeIf { it.isNotEmpty() && it.lowercase(Locale.ROOT).trimEnd('.', '!', ' ') !in genericStatusMessages }
     val expiryDate = expiry?.trim()?.take(10)?.let { raw ->
         runCatching { java.time.LocalDate.parse(raw) }.getOrNull()
             ?: runCatching { java.time.LocalDate.parse(raw, java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu", Locale.US)) }.getOrNull()
@@ -837,12 +832,16 @@ fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
 color = if (ui.running) Green else if (blocked) Red else Color.White
 )
 val accountNotice = gzmAccountNotice(st?.message, st?.expiry, java.time.LocalDate.now())
-if (!accountNotice.isNullOrBlank()) {
+if (ui.hasToken && st != null) {
 Spacer(Modifier.height(12.dp))
-Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Amber.copy(alpha = .14f)).padding(14.dp)) {
-Text(st?.title?.takeIf { it.isNotBlank() } ?: "Aviso de cuenta", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Blue.copy(alpha = .16f)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+Text("Cliente", color = Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
 Spacer(Modifier.height(4.dp))
-Text(accountNotice, color = Color.White, fontSize = 12.sp)
+Text(st.name.ifBlank { "Cuenta GZMNET" }, color = Blue, fontWeight = FontWeight.Bold, fontSize = 16.sp, textAlign = TextAlign.Center)
+if (!accountNotice.isNullOrBlank()) {
+Spacer(Modifier.height(6.dp))
+Text(accountNotice, color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
+}
 }
 }
 if (!ui.offline && !ui.error.isNullOrBlank()) {
@@ -875,14 +874,9 @@ Text(label, fontWeight = FontWeight.SemiBold, color = color, modifier = Modifier
 }
 Spacer(Modifier.height(14.dp))
 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-Text("Suscripción", color = Muted, fontSize = 11.sp)
+Text("Cliente", color = Muted, fontSize = 11.sp)
 Spacer(Modifier.height(3.dp))
-val nameColor = when (gzmSubscriptionAccent(st?.state)) {
-"red" -> Red
-"yellow" -> Amber
-else -> Blue
-}
-Text(st?.name?.ifBlank { "Cuenta GZMNET" } ?: "Cuenta GZMNET", color = nameColor, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
+Text(st?.name?.ifBlank { "Cuenta GZMNET" } ?: "Cuenta GZMNET", color = Blue, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
 }
 InfoRow("Vence", st?.expiry?.ifBlank { "Sin vencimiento" } ?: "—")
 Spacer(Modifier.height(10.dp))
