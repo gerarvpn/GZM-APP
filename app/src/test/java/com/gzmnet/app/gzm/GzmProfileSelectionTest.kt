@@ -6,6 +6,14 @@ import org.junit.jupiter.api.Test
 
 class GzmProfileSelectionTest {
     @Test
+    fun `account notice includes panel message and warns within three days of renewal`() {
+        val today = java.time.LocalDate.of(2026, 11, 25)
+        assertEquals("Vence pronto\nTu pago o renovación vence en 2 días.", gzmAccountNotice("Vence pronto", "2026-11-27", today))
+        assertEquals("Tu pago o renovación vence hoy.", gzmAccountNotice(null, "25/11/2026", today))
+        assertEquals(null, gzmAccountNotice(null, "2026-12-01", today))
+    }
+
+    @Test
     fun `saved config with a missing sync timestamp does not trigger a download on boot`() {
         assertEquals(false, isGzmConfigRefreshDue(lastSyncAt = 0L, now = 1_000_000L, intervalHours = 12, hasSavedConfig = true))
         assertEquals(true, isGzmConfigRefreshDue(lastSyncAt = 0L, now = 1_000_000L, intervalHours = 12, hasSavedConfig = false))

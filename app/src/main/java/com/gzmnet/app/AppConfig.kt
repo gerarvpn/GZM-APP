@@ -208,6 +208,7 @@ object AppConfig {
     const val MSG_GZM_TRAFFIC_START = 82
     const val MSG_GZM_TRAFFIC_STOP = 83
     const val MSG_GZM_TRAFFIC_SAMPLE = 84
+    const val MSG_GZM_START_PHASE = 85
 
     /** Notification channel IDs and names. */
     // Use a new ID because Android does not let an app raise an existing channel's importance.

@@ -21,6 +21,7 @@ La compilación y el análisis del código no demuestran que una VPN pase tráfi
 ## Panel y persistencia
 
 - Reiniciar completamente el teléfono/TV, abrir GZMNET y comprobar que recupera el perfil seleccionado desde la copia cifrada local sin pulsar Actualizar servidores. La pérdida del marcador de última sincronización no debe convertir un perfil local existente en una sincronización forzada.
+- En Android 11 TV y un teléfono, comprobar el primer frame y que el fondo de arranque sea grafito (sin pantalla blanca); registrar el tiempo real de abrir antes/después. El registro de red, limpieza temporal y WorkManager se difieren al primer frame.
 - Verificar que BOOT_COMPLETED no descarga la lista legacy de suscripciones: el arranque usa la configuración local, y solo Actualizar servidores o el intervalo GZM pueden refrescarla.
 - Con perfil guardado y estado de cuenta cacheado como antiguo/inactivo, comprobar que la conexión local arranca de inmediato; si el panel informa después que la cuenta está realmente desactivada, debe detenerla.
 - Sin Internet al iniciar, comprobar que la configuración guardada no se borra ni se hace una descarga de servidores antes de conectar.
@@ -45,6 +46,8 @@ Android exige que las conexiones del propio cliente VPN salgan por la red subyac
 - Las builds distribuibles se firman con una sola clave privada guardada como secreto del repositorio; el proyecto cambió a un ID de app nuevo porque las vistas previas tenían firmas distintas y Android rechazaba su actualización directa.
 - El APK universal está firmado con el esquema v2 y requiere Android 7/API 24, mínimo que exige la librería Android de Xray.
 - El túnel no espera el ping HTTP antes de avisar que arrancó: la latencia se consulta en segundo plano para que la pantalla responda antes. Si no contesta, muestra el fallo y lo guarda en diagnóstico.
+- Durante el arranque de VPN la UI recibe fases desde el servicio (interfaz VPN, perfil local, Xray, confirmación). Si ocurre el watchdog, el reporte guarda la última fase. Si el arranque del núcleo devuelve false, ahora se informa el fallo en vez de dejar a Inicio esperando hasta el timeout.
+- En Inicio se combina el mensaje de cuenta recibido del panel con un aviso local cuando la fecha de renovación es hoy, vencida o dentro de 3 días. El aviso usa el estado cacheado y no descarga configuración de servidores.
 - La interfaz cancela y muestra un error si el inicio queda pendiente por más de 90 segundos; se ignoran callbacks de inicio tardíos.
 - Los diagnósticos se guardan localmente, con límite de tamaño y redacción de tokens, contraseñas y enlaces de servidores. Solo se comparten cuando el usuario pulsa “Compartir con el creador”; incluyen versión de la app, Android, modelo y errores de la app, Xray y túnel.
 - La build correrá pruebas JVM del tiempo límite, respuesta de ping, categorías de error, redacción de datos sensibles y limpieza solo después de confirmar reemplazo del paquete, además de compilación y verificación de APK.

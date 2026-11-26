@@ -6,6 +6,12 @@ import org.junit.jupiter.api.Test
 
 class CoreVpnStartDecisionTest {
     @Test
+    fun `return a clear failure instead of leaving UI waiting when core start returns false`() {
+        assertTrue(coreStartFailureMessage(coreAlreadyRunning = true).contains("ya estaba activo"))
+        assertTrue(coreStartFailureMessage(coreAlreadyRunning = false).contains("no pudo iniciar"))
+    }
+
+    @Test
     fun `defer descriptor close while Xray is opening it on another thread`() {
         assertTrue(shouldDeferTunnelClose(coreStartInProgress = true, onCoreStartThread = false))
         assertFalse(shouldDeferTunnelClose(coreStartInProgress = true, onCoreStartThread = true))

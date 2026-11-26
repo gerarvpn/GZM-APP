@@ -12,6 +12,12 @@ class GzmStartupTimeoutTest {
     }
 
     @Test
+    fun `startup timeout names the last confirmed phase`() {
+        assertTrue(gzmStartupTimeoutDetail("Iniciando el núcleo Xray").contains("Iniciando el núcleo Xray"))
+        assertTrue(gzmStartupTimeoutDetail("").contains("esperando respuesta del servicio VPN"))
+    }
+
+    @Test
     fun `clock value before attempt start is not treated as timeout`() {
         assertFalse(hasGzmStartupTimedOut(5_000L, 4_000L))
     }

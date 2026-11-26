@@ -35,6 +35,13 @@ internal fun shouldReuseEstablishedVpn(coreRunning: Boolean, interfaceReady: Boo
 internal fun shouldDeferTunnelClose(coreStartInProgress: Boolean, onCoreStartThread: Boolean): Boolean =
     coreStartInProgress && !onCoreStartThread
 
+internal fun coreStartFailureMessage(coreAlreadyRunning: Boolean): String =
+    if (coreAlreadyRunning) {
+        "Xray ya estaba activo sin una interfaz VPN de esta sesión; se reinició el intento para evitar dejar la app esperando."
+    } else {
+        "Xray no pudo iniciar el núcleo de la VPN."
+    }
+
 @SuppressLint("VpnServicePolicy")
 class CoreVpnService : VpnService(), ServiceControl {
     private lateinit var mInterface: ParcelFileDescriptor
@@ -112,6 +119,7 @@ class CoreVpnService : VpnService(), ServiceControl {
             return START_NOT_STICKY
         }
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received, systemVpnStart=$isSystemVpnStart")
+        MessageHelper.sendMsg2UI(this, AppConfig.MSG_GZM_START_PHASE, "Preparando la interfaz VPN")
         if (!setupVpnService()) {
             unlockStart()
             // Stop service if setup fails to avoid infinite restart loops (START_STICKY)
@@ -136,9 +144,11 @@ class CoreVpnService : VpnService(), ServiceControl {
                         return@execute
                     }
                     if (!CoreServiceManager.startCoreLoop(mInterface)) {
-                        LogUtil.e(AppConfig.TAG, "StartCore-VPN: Failed to start core loop")
-                        GzmDiagnostics.recordMessage(this@CoreVpnService, "Xray startup", "Xray no pudo iniciar el core loop.")
+                        val detail = coreStartFailureMessage(CoreServiceManager.isRunning())
+                        LogUtil.e(AppConfig.TAG, "StartCore-VPN: $detail")
+                        GzmDiagnostics.recordMessage(this@CoreVpnService, "Xray startup", detail)
                         if (!stopAfterCoreStart.get()) stopAllServiceNow()
+                        MessageHelper.sendMsg2UI(this@CoreVpnService, AppConfig.MSG_STATE_START_FAILURE, detail)
                         return@execute
                     }
                     // A queued explicit stop runs immediately after this task, never during Xray's fd open.
@@ -190,6 +200,7 @@ class CoreVpnService : VpnService(), ServiceControl {
      * Prepares the VPN and configures it if preparation is successful.
      */
     private fun setupVpnService(): Boolean {
+        MessageHelper.sendMsg2UI(this, AppConfig.MSG_GZM_START_PHASE, "Verificando el permiso VPN")
         val prepare = prepare(this)
         if (prepare != null) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Permission not granted")
@@ -198,12 +209,14 @@ class CoreVpnService : VpnService(), ServiceControl {
             return false
         }
 
+        MessageHelper.sendMsg2UI(this, AppConfig.MSG_GZM_START_PHASE, "Creando el túnel del dispositivo")
         if (configureVpnService() != true) {
             LogUtil.e(AppConfig.TAG, "StartCore-VPN: Configuration failed")
             GzmDiagnostics.recordMessage(this, "VPN tunnel setup", "Android no pudo configurar la interfaz VPN.")
             return false
         }
 
+        MessageHelper.sendMsg2UI(this, AppConfig.MSG_GZM_START_PHASE, "Preparando el paso de tráfico")
         if (!runTun2socks()) {
             LogUtil.e(AppConfig.TAG, "VPN/HEV: tun2socks did not start; refusing to report a connected but non-forwarding VPN")
             GzmDiagnostics.recordMessage(this, "VPN tunnel setup", "El puente del túnel de tráfico no pudo iniciarse.")

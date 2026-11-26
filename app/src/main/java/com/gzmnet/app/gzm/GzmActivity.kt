@@ -117,6 +117,26 @@ internal fun hasGzmStartupTimedOut(startedAtMs: Long, nowMs: Long): Boolean =
     nowMs - startedAtMs >= GZM_STARTUP_TIMEOUT_MS
 internal fun isGzmConnectionProbeFailure(delayMillis: Long): Boolean = delayMillis < 0L
 
+internal fun gzmStartupTimeoutDetail(phase: String): String =
+    "El túnel no confirmó el inicio en 90 segundos. Última fase: ${phase.ifBlank { "esperando respuesta del servicio VPN" }}."
+
+internal fun gzmAccountNotice(message: String?, expiry: String?, today: java.time.LocalDate): String? {
+    val cleanMessage = message?.trim()?.takeIf { it.isNotEmpty() }
+    val expiryDate = expiry?.trim()?.take(10)?.let { raw ->
+        runCatching { java.time.LocalDate.parse(raw) }.getOrNull()
+            ?: runCatching { java.time.LocalDate.parse(raw, java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu", Locale.US)) }.getOrNull()
+    }
+    val days = expiryDate?.let { java.time.temporal.ChronoUnit.DAYS.between(today, it) }
+    val dueNotice = when {
+        days == null -> null
+        days < 0 -> "La suscripción venció el ${expiryDate?.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.getDefault())) ?: expiry?.trim().orEmpty()}."
+        days == 0L -> "Tu pago o renovación vence hoy."
+        days in 1L..3L -> "Tu pago o renovación vence en $days día${if (days == 1L) "" else "s"}."
+        else -> null
+    }
+    return listOfNotNull(cleanMessage, dueNotice).joinToString("\n").ifBlank { null }
+}
+
 data class GzmUi(
 val hasToken: Boolean = false,
 val status: GzmStatus? = null,
@@ -144,6 +164,7 @@ val pendingUpdateInstall: Boolean = false,
 val appRateUp: Long = 0,
 val appRateDown: Long = 0,
 val serverPingMs: Long? = null,
+val startupPhase: String = "",
 ) {
 val canConnect: Boolean get() = canStartFromLocalConfig(hasToken, hasConfig, assetsReady)
 }
@@ -168,6 +189,10 @@ private val panelSyncMutex = Mutex()
 private val receiver = object : BroadcastReceiver() {
 override fun onReceive(context: Context?, intent: Intent?) {
 when (intent?.getIntExtra("key", 0)) {
+AppConfig.MSG_GZM_START_PHASE -> {
+val phase = intent?.getStringExtra("content").orEmpty()
+if (_ui.value.starting && phase.isNotBlank()) _ui.update { it.copy(startupPhase = phase) }
+}
 AppConfig.MSG_GZM_TRAFFIC_SAMPLE -> {
 val parts = intent?.getStringExtra("content")?.split(',', limit = 2).orEmpty()
 val up = parts.getOrNull(0)?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
@@ -181,7 +206,7 @@ if (requestId == pingPendingId && result != null) {
 pingPendingId = ""
 if (isGzmConnectionProbeFailure(result.delayMillis)) {
 GzmDiagnostics.recordMessage(app, "Conexión", "El túnel arrancó, pero la prueba del servidor no respondió: ${result.errorMessage}")
-_ui.update { it.copy(serverPingMs = null, error = "La VPN está activa, pero el servidor no respondió a la prueba. Revisa la red o actualiza los servidores.") }
+_ui.update { it.copy(serverPingMs = null, error = "La VPN está activa, pero el servidor no respondió a la prueba. Revisa la conexión y vuelve a probar.") }
 } else {
 _ui.update { it.copy(serverPingMs = result.delayMillis, error = if (it.error?.startsWith("La VPN está activa") == true) null else it.error) }
 }
@@ -196,13 +221,13 @@ AppConfig.MSG_STATE_START_SUCCESS -> {
 if (_ui.value.starting) markRunning()
 }
 AppConfig.MSG_STATE_NOT_RUNNING, AppConfig.MSG_STATE_STOP_SUCCESS -> {
-_ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) }
+_ui.update { it.copy(running = false, starting = false, startupPhase = "", appRateUp = 0, appRateDown = 0) }
 }
 AppConfig.MSG_STATE_START_FAILURE -> {
 val detail = intent?.getStringExtra("content")?.trim().orEmpty()
 val safeDetail = detail.ifBlank { "No se pudo conectar. Inténtalo otra vez." }
 GzmDiagnostics.recordMessage(app, "VPN start failure", safeDetail)
-_ui.update { it.copy(running = false, starting = false, error = safeDetail) }
+_ui.update { it.copy(running = false, starting = false, startupPhase = "", error = safeDetail) }
 }
 }
 }
@@ -285,23 +310,29 @@ private fun markRunning() {
 // on the main thread here: Android TV Keystore calls added several seconds after Xray started.
 startAttemptStartedAt = 0L
 startAttemptId++
-_ui.update { it.copy(running = true, starting = false, error = null) }
+_ui.update { it.copy(running = true, starting = false, startupPhase = "", error = null) }
 if (activityVisible) {
 MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_START, "")
 requestServerPingIfDue(force = true)
 }
 }
+fun beginPermission() {
+startAttemptId++
+startAttemptStartedAt = 0L
+_ui.update { it.copy(starting = true, running = false, startupPhase = "Esperando permiso VPN", error = null) }
+}
 fun beginStart() {
 val attempt = ++startAttemptId
 val startedAt = SystemClock.elapsedRealtime()
 startAttemptStartedAt = startedAt
-_ui.update { it.copy(starting = true, running = false, error = null) }
+_ui.update { it.copy(starting = true, running = false, startupPhase = "Solicitando inicio del servicio VPN", error = null) }
 viewModelScope.launch {
 delay(GZM_STARTUP_TIMEOUT_MS)
 if (startAttemptId == attempt && _ui.value.starting && hasGzmStartupTimedOut(startedAt, SystemClock.elapsedRealtime())) {
 MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_STATE_STOP, "")
-GzmDiagnostics.recordMessage(getApplication(), "VPN startup timeout", "El túnel no confirmó el inicio en 90 segundos.")
-startFailed("La VPN no logró arrancar en 90 segundos. Se canceló el intento; revisa internet y actualiza los servidores antes de probar otra vez.")
+val detail = gzmStartupTimeoutDetail(_ui.value.startupPhase)
+GzmDiagnostics.recordMessage(getApplication(), "VPN startup timeout", detail)
+startFailed("${detail} El perfil local se conservó; no es necesario actualizar los servidores para reintentar.")
 }
 }
 }
@@ -311,7 +342,7 @@ if (startedAt > 0L) GzmDiagnostics.recordMessage(getApplication(), "VPN start fa
 startAttemptStartedAt = 0L
 startAttemptId++
 GzmPanel.setReconnectAfterUpdate(false)
-_ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDown = 0, error = message) }
+_ui.update { it.copy(starting = false, running = false, startupPhase = "", appRateUp = 0, appRateDown = 0, error = message) }
 }
 fun stopRequested() { startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
 fun stopFallback() { startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
@@ -574,12 +605,11 @@ private val networkCallback = object : ConnectivityManager.NetworkCallback() {
 override fun onAvailable(network: Network) { runOnUiThread { vm.onNetworkAvailable() } }
 }
 private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-if (it.resultCode == RESULT_OK) startVpnNow() else vm.startFailed("Se necesita permiso de VPN para conectar.")
+if (it.resultCode == RESULT_OK) { vm.beginStart(); startVpnNow() } else vm.startFailed("Se necesita permiso de VPN para conectar.")
 }
 private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 override fun onCreate(savedInstanceState: Bundle?) {
 super.onCreate(savedInstanceState)
-GzmUpdate.cleanupInterruptedDownload(this)
 window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 val uiMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
 val isTv = packageManager.hasSystemFeature("android.software.leanback") ||
@@ -593,13 +623,16 @@ controller.hide(WindowInsetsCompat.Type.systemBars())
 controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 }
 }
+setContent { GzmApp(vm, ::toggle, isTv) }
+// Defer connectivity registration, cache cleanup and WorkManager setup until after the first frame.
+window.decorView.post {
 connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
 runCatching { connectivityManager?.registerDefaultNetworkCallback(networkCallback) }
-setContent { GzmApp(vm, ::toggle, isTv) }
-// Defer non-visual startup work until after the first frame, and capture cold-start slowness.
-window.decorView.post {
+Thread({
+runCatching { GzmUpdate.cleanupInterruptedDownload(applicationContext) }
+if (GzmPanel.hasToken()) runCatching { GzmSyncWorker.schedule(applicationContext) }
+}, "gzm-post-frame-init").apply { priority = Thread.NORM_PRIORITY - 1; start() }
 if (Build.VERSION.SDK_INT >= 33) runCatching { notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
-if (GzmPanel.hasToken()) Thread({ runCatching { GzmSyncWorker.schedule(applicationContext) } }, "gzm-work-schedule").apply { priority = Thread.NORM_PRIORITY - 1; start() }
 }
 }
 override fun onResume() {
@@ -644,9 +677,8 @@ return
 // server profile exists, let the VPN start immediately; a fresh panel response can stop it
 // later if the account was actually revoked or disabled.
 GzmPanel.setReconnectAfterUpdate(true)
-vm.beginStart()
 val intent = VpnService.prepare(this)
-if (intent == null) startVpnNow() else vpnPermission.launch(intent)
+if (intent == null) { vm.beginStart(); startVpnNow() } else { vm.beginPermission(); vpnPermission.launch(intent) }
 }
 private fun startVpnNow() {
 val ok = runCatching { LauncherManager.startServiceFromToggle(this) }.getOrElse {
@@ -782,7 +814,7 @@ Spacer(Modifier.height(18.dp))
 Text(
 when {
 ui.running -> "Conectado"
-ui.starting -> "Conectando · toca para cancelar"
+ui.starting -> if (ui.startupPhase.isBlank()) "Conectando…" else "${ui.startupPhase} · toca para cancelar"
 blocked -> st?.message.orEmpty()
 st?.state == "no_servers" -> "Sin servidores disponibles"
 !ui.assetsReady -> "Preparando datos de conexión…"
@@ -792,6 +824,15 @@ else -> "Toca para conectar"
 fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
 color = if (ui.running) Green else if (blocked) Red else Color.White
 )
+val accountNotice = gzmAccountNotice(st?.message, st?.expiry, java.time.LocalDate.now())
+if (!accountNotice.isNullOrBlank()) {
+Spacer(Modifier.height(12.dp))
+Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Amber.copy(alpha = .14f)).padding(14.dp)) {
+Text(st?.title?.takeIf { it.isNotBlank() } ?: "Aviso de cuenta", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+Spacer(Modifier.height(4.dp))
+Text(accountNotice, color = Color.White, fontSize = 12.sp)
+}
+}
 if (!ui.offline && !ui.error.isNullOrBlank()) {
 Spacer(Modifier.height(8.dp))
 Text(ui.error, modifier = Modifier.fillMaxWidth(), color = Red, fontSize = 12.sp, textAlign = TextAlign.Center)

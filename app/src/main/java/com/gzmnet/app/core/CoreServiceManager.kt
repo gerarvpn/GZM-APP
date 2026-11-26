@@ -102,6 +102,7 @@ object CoreServiceManager {
         }
 
         try {
+            MessageHelper.sendMsg2UI(service, AppConfig.MSG_GZM_START_PHASE, "Cargando la configuración local")
             doStartCoreLoop(service, vpnInterface)
             return true
         } catch (e: Exception) {
@@ -151,6 +152,7 @@ object CoreServiceManager {
             tunFd = 0
         }
 
+        MessageHelper.sendMsg2UI(service, AppConfig.MSG_GZM_START_PHASE, "Iniciando el núcleo Xray")
         NotificationManager.showNotification(currentConfig)
         if (dialerAddr.isNotNullEmpty()) {
             CoreNativeManager.reconcileBrowserDialer(dialerAddr)
@@ -184,6 +186,7 @@ object CoreServiceManager {
         }
 
         if (!isReload) {
+            MessageHelper.sendMsg2UI(service, AppConfig.MSG_GZM_START_PHASE, "Confirmando el túnel")
             MessageHelper.sendMsg2UI(service, AppConfig.MSG_STATE_START_SUCCESS, "")
         }
         NotificationManager.startSpeedNotification()

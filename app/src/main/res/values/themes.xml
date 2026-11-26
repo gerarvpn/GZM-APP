@@ -1,5 +1,5 @@
 <resources>
-    <color name="window_background_light">#FFFFFFFF</color>
+    <color name="window_background_light">#FF1B1C1F</color>
     <color name="window_background_dark">#FF1C1B1F</color>
 
     <style name="AppThemeBaseCommon" parent="Theme.AppCompat.DayNight.NoActionBar">
