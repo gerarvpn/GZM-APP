@@ -23,9 +23,9 @@ class GzmPanelOfflineDecisionTest {
     }
 
     @Test
-    fun `recent pending ping is not duplicated unless forced`() {
+    fun `recent pending ping is never duplicated even by a forced resume request`() {
         assertFalse(shouldSendGzmPing(force = false, hasPending = true, pendingAgeMs = 5_000L, sinceLastRequestMs = 20_000L))
-        assertTrue(shouldSendGzmPing(force = true, hasPending = true, pendingAgeMs = 5_000L, sinceLastRequestMs = 20_000L))
+        assertFalse(shouldSendGzmPing(force = true, hasPending = true, pendingAgeMs = 5_000L, sinceLastRequestMs = 20_000L))
     }
 
     @Test
