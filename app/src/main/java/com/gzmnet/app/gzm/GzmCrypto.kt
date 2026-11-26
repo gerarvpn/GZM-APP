@@ -24,6 +24,7 @@ object GzmCrypto {
     private const val ALIAS = "gzmnet_wrap_v1"
     private const val TAG = "GzmCrypto"
     @Volatile private var appCtx: Context? = null
+    @Volatile private var cachedSecretKey: SecretKey? = null
 
     fun init(ctx: Context) {
         if (appCtx == null) appCtx = ctx.applicationContext
@@ -39,24 +40,29 @@ object GzmCrypto {
     }
 
     private fun secretKey(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
-        return withFileLock {
-            val ks2 = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            (ks2.getKey(ALIAS, null) as? SecretKey) ?: run {
-                val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-                gen.init(
-                    KeyGenParameterSpec.Builder(
-                        ALIAS,
-                        KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        cachedSecretKey?.let { return it }
+        return synchronized(this) {
+            cachedSecretKey?.let { return@synchronized it }
+            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            val key = (ks.getKey(ALIAS, null) as? SecretKey) ?: withFileLock {
+                val ks2 = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                (ks2.getKey(ALIAS, null) as? SecretKey) ?: run {
+                    val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+                    gen.init(
+                        KeyGenParameterSpec.Builder(
+                            ALIAS,
+                            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                        )
+                            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                            .setKeySize(256)
+                            .build()
                     )
-                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                        .setKeySize(256)
-                        .build()
-                )
-                gen.generateKey()
+                    gen.generateKey()
+                }
             }
+            cachedSecretKey = key
+            key
         }
     }
 

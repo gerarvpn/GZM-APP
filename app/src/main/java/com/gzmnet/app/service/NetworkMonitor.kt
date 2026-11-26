@@ -65,27 +65,13 @@ class NetworkMonitor(
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             val caps = connectivity.getNetworkCapabilities(network) ?: return
-            if (!shouldAcceptUnderlyingNetwork(
-                    isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
-                    hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
-                )) return
-            val previous = upstream
-            upstream = network
-            onUnderlyingNetworksChanged(arrayOf(network))
-            if (previous != null && previous != network) scheduleHandover(network)
+            acceptUnderlyingNetwork(network, caps)
         }
 
         override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-            if (network != upstream) return
-            if (!shouldAcceptUnderlyingNetwork(
-                    isVpn = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
-                    hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
-                )) {
-                upstream = null
-                onUnderlyingNetworksChanged(null)
-                return
-            }
-            onUnderlyingNetworksChanged(arrayOf(network))
+            // Some devices deliver capabilities just after onAvailable; accept that first usable
+            // event, but ignore late capability updates from an older network after handover.
+            if (upstream == null || network == upstream) acceptUnderlyingNetwork(network, networkCapabilities)
         }
 
         override fun onLost(network: Network) {
@@ -94,6 +80,23 @@ class NetworkMonitor(
                 onUnderlyingNetworksChanged(null)
             }
         }
+    }
+
+    private fun acceptUnderlyingNetwork(network: Network, capabilities: NetworkCapabilities) {
+        if (!shouldAcceptUnderlyingNetwork(
+                isVpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+                hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+            )) {
+            if (network == upstream) {
+                upstream = null
+                onUnderlyingNetworksChanged(null)
+            }
+            return
+        }
+        val previous = upstream
+        upstream = network
+        onUnderlyingNetworksChanged(arrayOf(network))
+        if (previous != null && previous != network) scheduleHandover(network)
     }
 
     /**

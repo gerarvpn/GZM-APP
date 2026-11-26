@@ -19,7 +19,28 @@ import com.gzmnet.app.service.CoreVpnService
 import com.gzmnet.app.util.LogUtil
 import com.gzmnet.app.util.Utils
 
+internal fun canStartCachedGzmVpn(hasSelectedServer: Boolean): Boolean = hasSelectedServer
+
 object LauncherManager {
+
+    /**
+     * GZM-APP already validates that its selected local profile exists before enabling Connect.
+     * Launch the VPN service directly so the UI thread does not decode/validate the same profile
+     * a second time; the service/core remains the authority and reports malformed local profiles.
+     */
+    fun startGzmVpnServiceFromCachedProfile(context: Context): Boolean {
+        if (!canStartCachedGzmVpn(!MmkvManager.getSelectServer().isNullOrBlank())) return false
+        return try {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context.applicationContext, CoreVpnService::class.java),
+            )
+            true
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "LauncherManager: Failed to start cached GZM VPN service", e)
+            false
+        }
+    }
 
     fun startServiceFromToggle(context: Context): Boolean {
         if (MmkvManager.getSelectServer().isNullOrEmpty()) {

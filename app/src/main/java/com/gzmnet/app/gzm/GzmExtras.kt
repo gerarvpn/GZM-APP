@@ -329,9 +329,9 @@ object GzmUpdate {
                     isCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
                 )
             }
-            val selected = active?.takeIf { score(it) != null }
-                ?: candidates.mapNotNull { network -> score(network)?.let { network to it } }
-                    .maxByOrNull { it.second }?.first
+            val scoredNetworks = candidates.mapNotNull { network -> score(network)?.let { network to it } }
+            val selected = scoredNetworks.maxByOrNull { it.second }?.first
+                ?: active?.takeIf { score(it) != null }
             if (selected != null) return selected.openConnection(url) as HttpURLConnection
             val activeIsVpn = active?.let { network ->
                 runCatching { connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }.getOrDefault(false)

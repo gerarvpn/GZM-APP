@@ -6,6 +6,14 @@ import org.junit.jupiter.api.Test
 
 class GzmProfileSelectionTest {
     @Test
+    fun `subscription name accent is blue when active and changes for disabled states`() {
+        assertEquals("blue", gzmSubscriptionAccent("active"))
+        assertEquals("red", gzmSubscriptionAccent("disabled"))
+        assertEquals("red", gzmSubscriptionAccent("expired"))
+        assertEquals("yellow", gzmSubscriptionAccent("exhausted"))
+    }
+
+    @Test
     fun `account notice includes panel message and warns within three days of renewal`() {
         val today = java.time.LocalDate.of(2026, 11, 25)
         assertEquals("Vence pronto\nTu pago o renovación vence en 2 días.", gzmAccountNotice("Vence pronto", "2026-11-27", today))
