@@ -60,6 +60,32 @@ object MessageHelper {
         }
     }
 
+    /** Sends an ordered message and returns its final result code for authoritative state queries. */
+    internal fun sendMsg2ServiceForState(
+        ctx: Context,
+        what: Int,
+        content: Serializable,
+        onResult: (resultCode: Int) -> Unit,
+    ) {
+        val resultReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) { onResult(resultCode) }
+        }
+        try {
+            ctx.sendOrderedBroadcast(
+                messageIntent(AppConfig.BROADCAST_ACTION_SERVICE, what, content),
+                null,
+                resultReceiver,
+                null,
+                Activity.RESULT_CANCELED,
+                null,
+                null,
+            )
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "Failed to query VPN daemon state", e)
+            onResult(Activity.RESULT_CANCELED)
+        }
+    }
+
     /**
      * Sends a message to the UI.
      *

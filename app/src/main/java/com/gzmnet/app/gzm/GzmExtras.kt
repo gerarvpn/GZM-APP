@@ -214,7 +214,7 @@ object GzmAuto {
                 if (c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || c.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) wifi = true
                 if (c.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) cell = true
             }
-            val want = (wifiOpt && wifi) || (mobOpt && cell && !wifi)
+            val want = shouldAutoConnectOnGzmNetwork(wifiOpt, mobOpt, wifi, cell)
             if (!want || isRunning(ctx)) return
             if (VpnService.prepare(ctx) != null) return   // sin permiso de VPN no se puede iniciar en segundo plano
             GzmSettings.ensureVpnMode()
@@ -294,6 +294,44 @@ internal fun canUseGzmPhysicalNetwork(isVpn: Boolean, hasInternet: Boolean): Boo
 internal fun gzmNetworkPreferenceScore(isValidated: Boolean, isWifiOrEthernet: Boolean, isCellular: Boolean): Int =
     (if (isValidated) 100 else 0) + (if (isWifiOrEthernet) 10 else 0) + (if (isCellular) 5 else 0)
 
+internal fun isGzmUpdateBuildNewer(downloadedBuild: Int, installedBuild: Int): Boolean = downloadedBuild > installedBuild
+
+internal fun shouldAutoConnectOnGzmNetwork(wifiEnabled: Boolean, mobileEnabled: Boolean, wifiAvailable: Boolean, mobileAvailable: Boolean): Boolean =
+    (wifiEnabled && wifiAvailable) || (mobileEnabled && mobileAvailable)
+
+/** Opens a control-plane request on an actual internet network, never on this app's VPN TUN. */
+internal fun gzmOpenPhysicalConnection(context: Context, url: URL): HttpURLConnection {
+    val connectivity = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return url.openConnection() as HttpURLConnection
+    fun usable(network: Network): Boolean? {
+        val caps = runCatching { connectivity.getNetworkCapabilities(network) }.getOrNull() ?: return null
+        return canUseGzmPhysicalNetwork(
+            isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+            hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
+        )
+    }
+    val active = runCatching { connectivity.activeNetwork }.getOrNull()
+    val selected = runCatching { connectivity.allNetworks.toList() }.getOrDefault(emptyList())
+        .mapNotNull { network ->
+            val caps = runCatching { connectivity.getNetworkCapabilities(network) }.getOrNull() ?: return@mapNotNull null
+            if (!canUseGzmPhysicalNetwork(caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN), caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))) return@mapNotNull null
+            network to gzmNetworkPreferenceScore(
+                isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+                isWifiOrEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
+                isCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
+            )
+        }.maxByOrNull { it.second }?.first
+    if (selected != null) return selected.openConnection(url) as HttpURLConnection
+    if (active != null && usable(active) == true) return active.openConnection(url) as HttpURLConnection
+    if (active != null && usable(active) == false) {
+        val caps = runCatching { connectivity.getNetworkCapabilities(active) }.getOrNull()
+        if (caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true) {
+            throw java.io.IOException("No se encontró una red física con internet para contactar el panel.")
+        }
+    }
+    return url.openConnection() as HttpURLConnection
+}
+
 /** Actualización desde la propia app, usando el último Release de GitHub. */
 object GzmUpdate {
     private const val REPO = "gerarvpn/GZM-APP"
@@ -315,62 +353,45 @@ object GzmUpdate {
     fun currentBuild(): Int = BuildConfig.VERSION_CODE % 1_000_000
     fun currentName(): String = BuildConfig.VERSION_NAME
 
-    private fun openConnection(context: Context, url: URL): HttpURLConnection {
-        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-        if (connectivity != null) {
-            val candidates = runCatching { connectivity.allNetworks.toList() }.getOrDefault(emptyList())
-            val active = runCatching { connectivity.activeNetwork }.getOrNull()
-            fun score(network: Network): Int? {
-                val caps = runCatching { connectivity.getNetworkCapabilities(network) }.getOrNull() ?: return null
-                if (!canUseGzmPhysicalNetwork(
-                        isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
-                        hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
-                    )) return null
-                return gzmNetworkPreferenceScore(
-                    isValidated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
-                    isWifiOrEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET),
-                    isCellular = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR),
-                )
-            }
-            val scoredNetworks = candidates.mapNotNull { network -> score(network)?.let { network to it } }
-            val selected = scoredNetworks.maxByOrNull { it.second }?.first
-                ?: active?.takeIf { score(it) != null }
-            if (selected != null) return selected.openConnection(url) as HttpURLConnection
-            val activeIsVpn = active?.let { network ->
-                runCatching { connectivity.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true }.getOrDefault(false)
-            } == true
-            if (activeIsVpn) throw java.io.IOException("No se encontró una red física con internet para la actualización.")
-        }
-        return url.openConnection() as HttpURLConnection
-    }
+    private fun openConnection(context: Context, url: URL): HttpURLConnection =
+        gzmOpenPhysicalConnection(context, url)
 
-    /** null = no se pudo consultar. */
+    /** null = no se pudo consultar. Retries once over the best available physical network. */
     suspend fun latest(context: Context): GzmRelease? = withContext(Dispatchers.IO) {
         latestFailure = null
-        var connection: HttpURLConnection? = null
-        try {
-            connection = openConnection(context.applicationContext, URL("https://api.github.com/repos/$REPO/releases/latest"))
-            connection.connectTimeout = 10000
-            connection.readTimeout = 12000
-            connection.setRequestProperty("Accept", "application/vnd.github+json")
-            connection.setRequestProperty("User-Agent", "GZMNET-App")
-            if (connection.responseCode != 200) {
-                latestFailure = "GitHub respondió HTTP ${connection.responseCode}."
-                return@withContext null
+        var lastFailure = "GitHub no devolvió información de versión."
+        for (attempt in 0..1) {
+            var connection: HttpURLConnection? = null
+            try {
+                connection = openConnection(context.applicationContext, URL("https://api.github.com/repos/$REPO/releases/latest?gzm_attempt=$attempt"))
+                connection.connectTimeout = 10000
+                connection.readTimeout = 12000
+                connection.useCaches = false
+                connection.setRequestProperty("Accept", "application/vnd.github+json")
+                connection.setRequestProperty("User-Agent", "GZMNET-App")
+                val code = connection.responseCode
+                if (code != 200) {
+                    lastFailure = "GitHub respondió HTTP $code."
+                    if (attempt == 0) continue else break
+                }
+                val o = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+                val name = o.optString("name")
+                val build = parseGzmReleaseBuild(name)
+                if (build == null) {
+                    lastFailure = "GitHub respondió, pero el nombre de la versión no contiene el número de build."
+                    if (attempt == 0) continue else break
+                }
+                latestFailure = null
+                return@withContext GzmRelease(build, name)
+            } catch (e: Exception) {
+                lastFailure = gzmUpdateFailureSummary(e)
+                if (attempt == 1) break
+            } finally {
+                connection?.disconnect()
             }
-            val o = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
-            val name = o.optString("name")
-            val b = parseGzmReleaseBuild(name) ?: run {
-                latestFailure = "GitHub respondió, pero el nombre de la versión no contiene el número de build."
-                return@withContext null
-            }
-            GzmRelease(b, name)
-        } catch (e: Exception) {
-            latestFailure = gzmUpdateFailureSummary(e)
-            null
-        } finally {
-            connection?.disconnect()
         }
+        latestFailure = lastFailure
+        null
     }
 
     /**
@@ -391,67 +412,90 @@ object GzmUpdate {
     }
 
     private fun downloadApk(context: Context, id: Long, state: DownloadState) {
-        var connection: HttpURLConnection? = null
         val target = File(context.cacheDir, FILE)
         val partial = File(context.cacheDir, PARTIAL_FILE)
-        try {
-            // Keep only the current attempt's partial; clear an older APK before starting a new one.
-            partial.delete()
-            target.delete()
-            connection = openConnection(context, URL("$APK_URL?gzm_build=$id"))
-            connection.connectTimeout = 20000
-            connection.readTimeout = 45000
-            connection.instanceFollowRedirects = true
-            connection.useCaches = false
-            connection.setRequestProperty("User-Agent", "GZMNET-App")
-            connection.setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream")
-            val status = connection.responseCode
-            if (status != HttpURLConnection.HTTP_OK) {
-                error("GitHub respondió HTTP $status al descargar el instalador.")
-            }
-            val total = connection.contentLengthLong
-            var received = 0L
-            BufferedInputStream(connection.inputStream).use { input ->
-                FileOutputStream(partial).use { fileOutput ->
-                    BufferedOutputStream(fileOutput).use { output ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
-                        while (true) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            output.write(buffer, 0, count)
-                            received += count
-                            if (total > 0) state.progress.set(((received * 100L) / total).toInt().coerceIn(0, 99))
+        repeat(2) { attempt ->
+            var connection: HttpURLConnection? = null
+            try {
+                // A fresh network-bound retry helps transient cellular handovers without
+                // requiring the user to tap Download repeatedly.
+                partial.delete()
+                if (attempt == 0) target.delete()
+                state.error = null
+                state.progress.set(0)
+                connection = openConnection(context, URL("$APK_URL?gzm_build=$id&attempt=$attempt"))
+                connection.connectTimeout = 20000
+                connection.readTimeout = 45000
+                connection.instanceFollowRedirects = true
+                connection.useCaches = false
+                connection.setRequestProperty("User-Agent", "GZMNET-App")
+                connection.setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream")
+                val status = connection.responseCode
+                if (status != HttpURLConnection.HTTP_OK) error("GitHub respondió HTTP $status al descargar el instalador.")
+                val total = connection.contentLengthLong
+                var received = 0L
+                BufferedInputStream(connection.inputStream).use { input ->
+                    FileOutputStream(partial).use { fileOutput ->
+                        BufferedOutputStream(fileOutput).use { output ->
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                                received += count
+                                if (total > 0) state.progress.set(((received * 100L) / total).toInt().coerceIn(0, 99))
+                            }
+                            output.flush()
+                            fileOutput.fd.sync()
                         }
-                        output.flush()
-                        fileOutput.fd.sync()
                     }
                 }
-            }
-            if (!partial.exists() || partial.length() != received || !isGzmUpdateDownloadComplete(received, total)) {
-                error("La descarga del APK llegó vacía o incompleta ($received de $total bytes).")
-            }
-            val apkHeader = ByteArray(4)
-            partial.inputStream().use { input ->
-                if (input.read(apkHeader) != apkHeader.size || !isGzmApkZipHeader(apkHeader)) {
-                    error("GitHub no devolvió un instalador APK válido.")
+                if (!partial.exists() || partial.length() != received || !isGzmUpdateDownloadComplete(received, total)) {
+                    error("La descarga del APK llegó vacía o incompleta ($received de $total bytes).")
                 }
-            }
-            if (target.exists() && !target.delete()) error("No se pudo reemplazar el instalador anterior.")
-            if (!partial.renameTo(target)) {
-                partial.copyTo(target, overwrite = true)
+                val apkHeader = ByteArray(4)
+                partial.inputStream().use { input ->
+                    if (input.read(apkHeader) != apkHeader.size || !isGzmApkZipHeader(apkHeader)) error("GitHub no devolvió un instalador APK válido.")
+                }
+                if (target.exists() && !target.delete()) error("No se pudo reemplazar el instalador anterior.")
+                if (!partial.renameTo(target)) {
+                    partial.copyTo(target, overwrite = true)
+                    partial.delete()
+                }
+                state.error = null
+                state.progress.set(100)
+                return
+            } catch (failure: Exception) {
                 partial.delete()
+                if (attempt == 0) {
+                    state.error = null
+                    state.progress.set(0)
+                } else {
+                    state.error = failure.message?.take(300) ?: failure.javaClass.simpleName
+                    state.progress.set(-1)
+                }
+            } finally {
+                connection?.disconnect()
             }
-            state.progress.set(100)
-        } catch (failure: Exception) {
-            state.error = failure.message?.take(300) ?: failure.javaClass.simpleName
-            state.progress.set(-1)
-            partial.delete()
-        } finally {
-            connection?.disconnect()
         }
     }
 
     /** Devuelve porcentaje 0..100, 100 = listo, -1 = falló, -2 = pendiente. */
+    /** Rebuilds an in-memory completed-download handle after Activity/process recreation. */
+    fun restoreCompletedDownload(ctx: Context): Long? {
+        val apk = File(ctx.applicationContext.cacheDir, FILE)
+        if (!apk.isFile || apk.length() < 4L) return null
+        val header = ByteArray(4)
+        val valid = runCatching { apk.inputStream().use { it.read(header) == header.size && isGzmApkZipHeader(header) } }.getOrDefault(false)
+        if (!valid) return null
+        val archive = runCatching { ctx.packageManager.getPackageArchiveInfo(apk.absolutePath, 0) }.getOrNull() ?: return null
+        val build = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) (archive.longVersionCode % 1_000_000L).toInt() else archive.versionCode % 1_000_000
+        if (!isGzmUpdateBuildNewer(build, currentBuild())) return null
+        val id = nextDownloadId.incrementAndGet()
+        downloads[id] = DownloadState().apply { progress.set(100) }
+        return id
+    }
+
     fun progress(ctx: Context, id: Long): Int = downloads[id]?.let { state ->
         if (state.error != null) -1 else state.progress.get()
     } ?: -1

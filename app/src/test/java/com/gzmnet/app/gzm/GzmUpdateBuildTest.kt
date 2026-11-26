@@ -65,4 +65,12 @@ class GzmUpdateBuildTest {
         assertEquals(false, isGzmApkZipHeader("<html".toByteArray()))
         assertEquals(false, isGzmApkZipHeader(byteArrayOf(0x50, 0x4b)))
     }
+
+    @Test
+    fun `restored installer is offered only when it is newer than installed build`() {
+        assertEquals(true, isGzmUpdateBuildNewer(downloadedBuild = 1035, installedBuild = 1034))
+        assertEquals(false, isGzmUpdateBuildNewer(downloadedBuild = 1034, installedBuild = 1034))
+        assertEquals(false, isGzmUpdateBuildNewer(downloadedBuild = 1033, installedBuild = 1034))
+    }
+
 }

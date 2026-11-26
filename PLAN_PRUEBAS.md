@@ -60,3 +60,16 @@ Android exige que las conexiones del propio cliente VPN salgan por la red subyac
 - No se ha probado esta corrección en una TV física; la compilación y las pruebas automáticas no comprueban tráfico real.
 - Not run: arranque/conexión y tráfico reales sobre datos móviles, prueba de actualización por datos móviles, velocidad de apertura/conexión y estados visuales en TV/teléfono físicos; requieren hardware, SIM/plan con datos y prueba de instalación sobre la app existente.
 - Not run: confirmación en MTC Tecnomaster 2K de que `closed pipe`/`EOF` ya no aparece tras uso en segundo plano y al volver a Inicio; el ciclo real de conexión/reconexión requiere TV física y la red del usuario.
+
+
+## Correcciones de red móvil, primer permiso y actualización (pendiente de validar en hardware)
+
+- Las consultas de estado/configuración al panel y las actualizaciones se enlazan a una red física con Internet; se excluye la interfaz VPN. Si hay solo datos móviles, se usa la red celular aunque no aparezca como red por defecto del proceso.
+- La activación guarda el token cifrado inmediatamente y sincroniza la lista de servidores a la vez que prepara los assets fuera del hilo visual. Un perfil local solo puede usarse con el mismo token; una cuenta nueva fuerza descargar su propia configuración.
+- Al tocar Conectar con un token, se permite abrir el diálogo de consentimiento VPN de Android aunque la primera lista esté cargándose. Si el usuario concede permiso antes de que llegue el perfil, la app conecta sola cuando tenga perfil y assets, sin reiniciarla.
+- La descarga de actualización se serializa para evitar taps duplicados, hace un segundo intento automático si falla la red, restaura un APK completo pendiente si Android recrea el proceso y deja visible la acción de instalación correcta al volver desde Ajustes/instalador.
+- Pruebas JVM añadidas para disponibilidad del botón, inicio diferido con permiso/perfil/assets y detección de APK más nuevo.
+- Al volver a primer plano, se mantiene el estado de conexión mostrado hasta recibir la consulta ordenada del daemon. La respuesta incluye explícitamente conectado/desconectado para reconciliar la pantalla con la llave VPN; si el daemon ya no está, se reanuda desde el perfil local autorizado.
+- El auto-connect por celular ahora no se bloquea solo porque Wi-Fi también aparezca disponible; se respeta cada selector de Wi-Fi/celular de forma independiente.
+- Not run: build Gradle local, porque el entorno no dispone de Java; la verificación de CI queda pendiente. Not run: con la llave VPN visible, salir/volver y confirmar que la pantalla conserva «Conectado» al consultar el daemon; detener el daemon y confirmar reanudación solo desde perfil local; requiere TV/teléfono físicos.
+- Not run: primera solicitud de permiso VPN y conexión al panel/descarga e instalación por SIM/datos móviles, incluso con Wi-Fi visible; también la recuperación al alternar Wi-Fi→móvil. Requiere dispositivos reales, SIM/datos y prueba manual de instalación.

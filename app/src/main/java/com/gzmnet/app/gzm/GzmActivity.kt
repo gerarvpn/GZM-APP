@@ -1,5 +1,6 @@
 package com.gzmnet.app.gzm
 import android.Manifest
+import android.app.Activity
 import android.app.Application
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -95,6 +96,8 @@ import com.gzmnet.app.helper.MessageHelper
 import com.gzmnet.app.handler.MmkvManager
 import com.gzmnet.app.util.Utils
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -179,6 +182,16 @@ val canConnect: Boolean get() = canStartFromLocalConfig(hasToken, hasConfig, ass
 internal fun canStartFromLocalConfig(hasToken: Boolean, hasConfig: Boolean, assetsReady: Boolean): Boolean =
     hasToken && hasConfig && assetsReady
 
+internal fun shouldEnableGzmConnectAction(hasToken: Boolean, canConnect: Boolean, running: Boolean, starting: Boolean): Boolean =
+    running || (!starting && (canConnect || hasToken))
+
+internal fun isGzmDaemonReportedRunning(resultCode: Int): Boolean = resultCode == Activity.RESULT_OK
+internal fun isGzmDaemonReportedStopped(resultCode: Int): Boolean = resultCode == Activity.RESULT_FIRST_USER
+
+internal fun shouldStartDeferredGzmConnect(hasToken: Boolean, hasConfig: Boolean, assetsReady: Boolean,
+    activityVisible: Boolean, vpnPermissionGranted: Boolean, alreadyStarting: Boolean): Boolean =
+    !alreadyStarting && activityVisible && vpnPermissionGranted && canStartFromLocalConfig(hasToken, hasConfig, assetsReady)
+
 internal fun shouldResumeGzmVpn(
     resumeWasRequested: Boolean,
     activityVisible: Boolean,
@@ -200,6 +213,8 @@ private var installLaunchInProgress = false
 @Volatile private var startAttemptStartedAt = 0L
 @Volatile private var startupPhaseForDiagnostic = ""
 private val panelSyncMutex = Mutex()
+private val updateActionMutex = Mutex()
+@Volatile private var connectAfterPermission = false
 @Volatile private var lastConfigAttemptAt = 0L
 @Volatile private var panelFailureCount = 0
 @Volatile private var activityVisible = false
@@ -291,19 +306,24 @@ syncing = true,
 ).let(loadSettings())
 }
 _ui.update { current -> cached.copy(stateLoading = false, starting = current.starting, running = current.running, appRateUp = current.appRateUp, appRateDown = current.appRateDown) }
-withContext(Dispatchers.IO) {
+val restoredUpdateId = withContext(Dispatchers.IO) {
 GzmSettings.initializeAppSettings(getApplication())
 GzmSettings.ensureVpnMode()
 GzmPanel.ensureProfile()
+GzmUpdate.restoreCompletedDownload(getApplication())
 }
 val assetsReady = prepareGeoAssets()
 _ui.update {
 it.copy(
 hasToken = GzmPanel.hasToken(), status = GzmPanel.loadStatus(),
 hasConfig = GzmPanel.hasConfig(), assetsReady = assetsReady, initialized = true,
+updAvailable = restoredUpdateId != null, pendingUpdateInstall = restoredUpdateId != null,
+updText = if (restoredUpdateId != null) "Hay una actualización descargada lista para instalar." else it.updText,
 error = if (assetsReady) it.error else "Faltan los datos de geolocalización de Xray. Actualiza la app e inténtalo otra vez."
 ).let(loadSettings())
 }
+if (restoredUpdateId != null) pendingInstallId = restoredUpdateId
+tryStartDeferredConnect()
 GzmAuto.apply(getApplication())
 // Startup and connection use the encrypted local profile. Status refresh is deferred to
 // the regular background poll; a panel request must never gate the first Connect action.
@@ -350,14 +370,15 @@ val startedAt = startAttemptStartedAt
 if (startedAt > 0L) GzmDiagnostics.recordMessage(getApplication(), "VPN start failure", "El intento de conexión terminó tras ${SystemClock.elapsedRealtime() - startedAt} ms: $message")
 startAttemptStartedAt = 0L
 startAttemptId++
+connectAfterPermission = false
 GzmPanel.setReconnectAfterUpdate(false)
 resumeWhenForegrounded = false
 GzmPanel.setResumeWhenForegrounded(false)
 startupPhaseForDiagnostic = ""
 _ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDown = 0, error = message) }
 }
-fun stopRequested() { resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
-fun stopFallback() { resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
+fun stopRequested() { connectAfterPermission = false; resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
+fun stopFallback() { connectAfterPermission = false; resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
 fun refresh() {
 if (!GzmPanel.hasToken()) return
 viewModelScope.launch {
@@ -390,6 +411,7 @@ _ui.update { it.copy(syncing = false, offline = isPanelOfflineAfterFailures(pane
 } finally {
 panelSyncMutex.unlock()
 }
+tryStartDeferredConnect()
 }
 }
 fun setActivityVisible(visible: Boolean) {
@@ -401,11 +423,19 @@ MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_STOP, 
 return
 }
 activityVisible = true
-_ui.update { it.copy(running = false, appRateUp = 0, appRateDown = 0) }
-// The daemon remains authoritative. The ordered acknowledgment lets the UI recover from
-// its cached profile when Android has already killed the old foreground VPN service.
-MessageHelper.sendMsg2ServiceForResult(getApplication(), AppConfig.MSG_REGISTER_CLIENT, "") { handled ->
-    if (!handled) resumeFromLocalProfileIfNeeded()
+// Do not optimistically clear the connected state: Android may still show the VPN key and
+// the daemon's ordered reply is the source of truth. Preserve the last state until that reply.
+_ui.update { it.copy(appRateUp = 0, appRateDown = 0) }
+tryStartDeferredConnect()
+MessageHelper.sendMsg2ServiceForState(getApplication(), AppConfig.MSG_REGISTER_CLIENT, "") { resultCode ->
+    when {
+        isGzmDaemonReportedRunning(resultCode) -> markRunning()
+        isGzmDaemonReportedStopped(resultCode) -> {
+            if (!_ui.value.starting) _ui.update { it.copy(running = false, appRateUp = 0, appRateDown = 0) }
+            resumeFromLocalProfileIfNeeded()
+        }
+        else -> resumeFromLocalProfileIfNeeded()
+    }
 }
 }
 
@@ -428,6 +458,38 @@ private fun resumeFromLocalProfileIfNeeded() {
             startFailed("No se pudo reanudar la VPN desde el perfil guardado. Toca conectar para volver a intentarlo.")
         }
     }
+}
+fun deferConnectUntilReady() {
+connectAfterPermission = true
+_ui.update { it.copy(starting = false, running = false, error = "Permiso VPN concedido. Preparando el servidor guardado…") }
+if (GzmPanel.hasToken()) refresh()
+tryStartDeferredConnect()
+}
+fun cancelDeferredConnect() {
+if (!connectAfterPermission) return
+connectAfterPermission = false
+_ui.update { it.copy(error = null) }
+}
+fun isConnectDeferred(): Boolean = connectAfterPermission
+private fun tryStartDeferredConnect() {
+val app = getApplication<Application>()
+val current = _ui.value
+val permissionGranted = runCatching { VpnService.prepare(app) == null }.getOrDefault(false)
+if (!connectAfterPermission || !shouldStartDeferredGzmConnect(current.hasToken, current.hasConfig, current.assetsReady, activityVisible, permissionGranted, current.starting)) return
+connectAfterPermission = false
+GzmPanel.setReconnectAfterUpdate(true)
+beginStart()
+viewModelScope.launch {
+val started = withContext(Dispatchers.IO) { LauncherManager.startGzmVpnServiceFromCachedProfile(app) }
+if (!started && _ui.value.starting) startFailed("No se pudo iniciar la VPN con el servidor local. La configuración se conservó; vuelve a tocar conectar.")
+}
+}
+fun onVpnPermissionGranted() {
+if (_ui.value.canConnect) {
+connectAfterPermission = false
+GzmPanel.setReconnectAfterUpdate(true)
+beginStart()
+} else deferConnectUntilReady()
 }
 fun onNetworkAvailable() {
 if (activityVisible) {
@@ -460,54 +522,73 @@ panelSyncMutex.unlock()
 }
 }
 fun activate(raw: String) {
-val initialToken = GzmPanel.parseToken(raw)
+val resolvedToken = raw.trim()
+val initialToken = GzmPanel.parseToken(resolvedToken)
 if (initialToken == null) {
 _ui.update { it.copy(error = "Token inválido. Verifica el token y vuelve a pegarlo.") }
 return
 }
-viewModelScope.launch {
-if (!panelSyncMutex.tryLock()) return@launch
-try {
-lastConfigAttemptAt = System.currentTimeMillis()
 _ui.update { it.copy(syncing = true, error = null) }
-val assetsReady = prepareGeoAssets()
-if (!assetsReady) {
-_ui.update { it.copy(syncing = false, assetsReady = false, error = "Faltan los datos de geolocalización de Xray. Reinstala la app actualizada e inténtalo otra vez.") }
+viewModelScope.launch {
+if (!panelSyncMutex.tryLock()) {
+_ui.update { it.copy(syncing = false, error = "Ya hay una consulta en curso. Vuelve a intentar en un momento.") }
 return@launch
 }
-val resolvedToken = raw
+try {
+lastConfigAttemptAt = System.currentTimeMillis()
+// Capture old owner before replacing the token so another account cannot use its cached profile.
+val previous = withContext(Dispatchers.IO) {
+val hadConfig = GzmPanel.hasConfig()
+Triple(GzmPanel.loadToken(), hadConfig, GzmPanel.loadStatus())
+}
+val sameAccount = sameGzmTokenAccount(previous.first, initialToken)
 withContext(Dispatchers.IO) { GzmPanel.saveToken(resolvedToken) }
-val r = GzmPanel.sync(getApplication(), refreshConfig = true)
+_ui.update { it.copy(
+    hasToken = true,
+    hasConfig = sameAccount && previous.second,
+    status = if (sameAccount) previous.third else null,
+    offline = false,
+    initialized = true,
+    error = null,
+) }
+tryStartDeferredConnect()
+// Download the first config while local Xray assets are prepared off the UI thread.
+val (r, assetsReady) = coroutineScope {
+    val assets = async(Dispatchers.IO) { prepareGeoAssets() }
+    val response = GzmPanel.sync(getApplication(), refreshConfig = true)
+    response to assets.await()
+}
 if (r.offline) panelFailureCount = (panelFailureCount + 1).coerceAtMost(5) else panelFailureCount = 0
-val st = r.status
+// Never show the previous account's cached status after an offline token switch.
+val st = if (sameAccount || !r.offline) r.status else null
 when {
 r.offline && st == null -> {
 GzmSyncWorker.schedule(getApplication())
-_ui.update { it.copy(syncing = false, hasToken = true, status = GzmPanel.loadStatus(), hasConfig = GzmPanel.hasConfig(), assetsReady = assetsReady, initialized = true, offline = isPanelOfflineAfterFailures(panelFailureCount), error = null) }
+_ui.update { it.copy(syncing = false, hasToken = true, status = if (sameAccount) (GzmPanel.loadStatus() ?: previous.third) else null, hasConfig = sameAccount && GzmPanel.hasConfig(), assetsReady = assetsReady, initialized = true, offline = isPanelOfflineAfterFailures(panelFailureCount), error = if (assetsReady) null else "Faltan los datos locales para iniciar la VPN. Abre la app con internet para prepararlos.") }
 }
 st != null && st.state == "notfound" -> {
 withContext(Dispatchers.IO) { GzmPanel.clearAll(getApplication()) }
-_ui.update { it.copy(syncing = false, hasToken = false, initialized = true, error = "El token no existe, fue revocado o fue reiniciado.") }
+connectAfterPermission = false
+_ui.update { it.copy(syncing = false, hasToken = false, hasConfig = false, initialized = true, error = "El token no existe, fue revocado o fue reiniciado.") }
 }
 st != null && st.state == "device_limit" -> {
 withContext(Dispatchers.IO) { GzmPanel.clearAll(getApplication()) }
+connectAfterPermission = false
 _ui.update { it.copy(syncing = false, hasToken = false, hasConfig = false, initialized = true, error = "Se alcanzó el límite de dispositivos de esta cuenta. Libera un espacio en el panel y vuelve a vincular la TV.") }
 }
 else -> {
 GzmSyncWorker.schedule(getApplication())
-_ui.update {
-it.copy(syncing = false, hasToken = true, status = st ?: GzmPanel.loadStatus(), offline = isPanelOfflineAfterFailures(panelFailureCount), hasConfig = GzmPanel.hasConfig(), assetsReady = assetsReady, initialized = true, error = if (r.offline) null else r.error)
+_ui.update { it.copy(syncing = false, hasToken = true, status = st ?: if (sameAccount) GzmPanel.loadStatus() else null, offline = isPanelOfflineAfterFailures(panelFailureCount), hasConfig = GzmPanel.hasConfig(), assetsReady = assetsReady, initialized = true, error = if (!assetsReady) "Faltan los datos locales para iniciar la VPN. Abre la app con internet para prepararlos." else if (r.offline) null else r.error) }
 }
 }
-}
+tryStartDeferredConnect()
 } catch (e: Exception) {
 panelFailureCount = (panelFailureCount + 1).coerceAtMost(5)
-_ui.update { it.copy(syncing = false, hasToken = GzmPanel.hasToken(), hasConfig = GzmPanel.hasConfig(), initialized = true, offline = isPanelOfflineAfterFailures(panelFailureCount), error = null) }
-} finally {
-panelSyncMutex.unlock()
+_ui.update { it.copy(syncing = false, hasToken = GzmPanel.hasToken(), hasConfig = GzmPanel.hasConfig(), initialized = true, offline = isPanelOfflineAfterFailures(panelFailureCount), error = "No se pudo terminar la activación. El token y la configuración anterior se conservaron.") }
+} finally { panelSyncMutex.unlock() }
 }
 }
-}
+
 fun logout() {
 GzmPanel.setReconnectAfterUpdate(false)
 resumeWhenForegrounded = false
@@ -550,9 +631,10 @@ _ui.update { it.copy(proxyMsg = "No se pudo aplicar el cambio") }
 }
 }
 fun checkUpdate() {
-if (_ui.value.updBusy) return
-viewModelScope.launch {
+if (!updateActionMutex.tryLock()) return
 _ui.update { it.copy(updBusy = true, updText = "Buscando…", updAvailable = false) }
+viewModelScope.launch {
+try {
 val rel = GzmUpdate.latest(getApplication())
 _ui.update {
 when {
@@ -565,12 +647,16 @@ rel.build > GzmUpdate.currentBuild() -> it.copy(updBusy = false, updAvailable = 
 else -> it.copy(updBusy = false, updText = "Ya tienes la última versión")
 }
 }
+} finally {
+updateActionMutex.unlock()
+_ui.update { it.copy(updBusy = false) }
+}
 }
 }
 fun downloadUpdate() {
-if (_ui.value.updBusy) return
-viewModelScope.launch {
+if (!updateActionMutex.tryLock()) return
 _ui.update { it.copy(updBusy = true, updProgress = 0, updText = "Descargando…", pendingUpdateInstall = false) }
+viewModelScope.launch {
 pendingInstallId = -1L
 try {
 val id = withContext(Dispatchers.IO) { GzmUpdate.startDownload(getApplication()) }
@@ -588,15 +674,19 @@ _ui.update { it.copy(updProgress = if (p < 0) 0 else p) }
 if (p == 100) break
 }
 pendingInstallId = id
-_ui.update { it.copy(pendingUpdateInstall = true, updBusy = false, updProgress = -1, updText = "Descarga completa. Abriendo el instalador…") }
+_ui.update { it.copy(pendingUpdateInstall = true, updAvailable = true, updBusy = false, updProgress = -1, updText = "Descarga completa. Abriendo el instalador…") }
 launchPendingInstall(askPermission = true)
 } catch (e: Exception) {
 pendingInstallId = -1L
 GzmDiagnostics.record(getApplication(), "Descarga de actualización", e)
 _ui.update { it.copy(updBusy = false, updProgress = -1, updText = "No se pudo descargar la actualización. Revisa internet y vuelve a intentarlo.") }
+} finally {
+updateActionMutex.unlock()
+_ui.update { it.copy(updBusy = false) }
 }
 }
 }
+
 private fun launchPendingInstall(askPermission: Boolean) {
 val id = pendingInstallId
 if (id <= 0L || installLaunchInProgress) return
@@ -624,7 +714,16 @@ _ui.update { it.copy(pendingUpdateInstall = true, updText = message) }
 }
 }
 fun retryPendingUpdateInstall() = launchPendingInstall(askPermission = true)
-fun resumePendingUpdateInstall() = launchPendingInstall(askPermission = false)
+fun resumePendingUpdateInstall() {
+if (pendingInstallId > 0L) { launchPendingInstall(askPermission = false); return }
+viewModelScope.launch {
+val restored = withContext(Dispatchers.IO) { GzmUpdate.restoreCompletedDownload(getApplication()) }
+if (restored != null) {
+pendingInstallId = restored
+_ui.update { it.copy(updAvailable = true, pendingUpdateInstall = true, updText = "La actualización descargada sigue lista. Pulsa Instalar actualización para continuar.") }
+}
+}
+}
 override fun onCleared() {
 runCatching { MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_UNREGISTER_CLIENT, "") }
 runCatching { getApplication<Application>().unregisterReceiver(receiver) }
@@ -637,7 +736,9 @@ private val networkCallback = object : ConnectivityManager.NetworkCallback() {
 override fun onAvailable(network: Network) { runOnUiThread { vm.onNetworkAvailable() } }
 }
 private val vpnPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-if (it.resultCode == RESULT_OK) { vm.beginStart(); startVpnNow() } else vm.startFailed("Se necesita permiso de VPN para conectar.")
+if (it.resultCode == RESULT_OK) {
+if (vm.ui.value.canConnect) { vm.onVpnPermissionGranted(); startVpnNow() } else vm.deferConnectUntilReady()
+} else vm.startFailed("Se necesita permiso de VPN para conectar.")
 }
 private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 override fun onCreate(savedInstanceState: Bundle?) {
@@ -683,6 +784,7 @@ super.onDestroy()
 }
 private fun toggle() {
 val ui = vm.ui.value
+if (vm.isConnectDeferred()) { vm.cancelDeferredConnect(); return }
 if (ui.starting) {
 GzmPanel.setReconnectAfterUpdate(false)
 LauncherManager.stopService(this)
@@ -700,17 +802,18 @@ if (vm.ui.value.starting) vm.stopFallback()
 }, 1200)
 return
 }
+if (!ui.hasToken) return
+// Request the VPN consent on the first explicit Connect tap, even if the first server list
+// is still loading. After consent, the ViewModel starts automatically when local data is ready.
+val intent = VpnService.prepare(this)
+if (intent != null) { vm.beginPermission(); vpnPermission.launch(intent); return }
 if (!canStartFromLocalConfig(ui.hasToken, ui.hasConfig, ui.assetsReady)) {
-vm.startFailed(ui.error ?: "La cuenta todavía se está preparando. Espera un momento y vuelve a tocar conectar.")
-if (GzmPanel.hasToken()) vm.refresh()
+vm.deferConnectUntilReady()
 return
 }
-// A cached account status can be stale after a device reboot. If the local encrypted
-// server profile exists, let the VPN start immediately; a fresh panel response can stop it
-// later if the account was actually revoked or disabled.
 GzmPanel.setReconnectAfterUpdate(true)
-val intent = VpnService.prepare(this)
-if (intent == null) { vm.beginStart(); startVpnNow() } else { vm.beginPermission(); vpnPermission.launch(intent) }
+vm.beginStart()
+startVpnNow()
 }
 private fun startVpnNow() {
 val ok = runCatching { LauncherManager.startGzmVpnServiceFromCachedProfile(this) }.getOrElse {
@@ -822,7 +925,7 @@ Text("GZMNET", fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = 3
 TextButton(onClick = onRefresh, modifier = Modifier.tvFocus(RoundedCornerShape(12.dp))) { Text(if (ui.syncing) "…" else "Actualizar servidores", color = Blue) }
 }
 Spacer(Modifier.height(20.dp))
-PowerButton(running = ui.running, enabled = ui.canConnect || ui.running, onClick = onToggle, starting = ui.starting)
+PowerButton(running = ui.running, enabled = shouldEnableGzmConnectAction(ui.hasToken, ui.canConnect, ui.running, ui.starting), onClick = onToggle, starting = ui.starting)
 if (!ui.hasToken) {
 Spacer(Modifier.height(10.dp))
 if (ui.stateLoading) {
@@ -1023,13 +1126,13 @@ modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)), 
 Spacer(Modifier.height(10.dp))
 if (ui.updAvailable) {
 Button(
-onClick = { if (ui.pendingUpdateInstall) vm.retryPendingUpdateInstall() else vm.downloadUpdate() }, enabled = !ui.updBusy,
+onClick = { when { ui.pendingUpdateInstall -> vm.retryPendingUpdateInstall(); ui.updAvailable -> vm.downloadUpdate(); else -> vm.checkUpdate() } }, enabled = !ui.updBusy,
 modifier = Modifier.fillMaxWidth().height(48.dp).tvFocus(RoundedCornerShape(14.dp)), shape = RoundedCornerShape(14.dp),
 colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color.Black)
 ) { Text(if (ui.pendingUpdateInstall) "Instalar actualización" else "Descargar e instalar", fontWeight = FontWeight.Bold) }
 } else {
 Button(
-onClick = { vm.checkUpdate() }, enabled = !ui.updBusy,
+onClick = { if (ui.pendingUpdateInstall) vm.retryPendingUpdateInstall() else vm.checkUpdate() }, enabled = !ui.updBusy,
 modifier = Modifier.fillMaxWidth().height(48.dp).tvFocus(RoundedCornerShape(14.dp)), shape = RoundedCornerShape(14.dp)
 ) { Text(if (ui.updBusy) "Buscando…" else if (ui.pendingUpdateInstall) "Instalar actualización" else "Buscar actualización") }
 }

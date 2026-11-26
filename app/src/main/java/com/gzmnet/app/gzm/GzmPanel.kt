@@ -29,6 +29,9 @@ internal fun isGzmConfigRefreshDue(lastSyncAt: Long, now: Long, intervalHours: I
 
 data class GzmToken(val baseUrl: String, val sub: String)
 
+internal fun sameGzmTokenAccount(previous: GzmToken?, next: GzmToken): Boolean =
+    previous?.let { it.baseUrl.trimEnd('/') == next.baseUrl.trimEnd('/') && it.sub == next.sub } == true
+
 data class GzmStatus(
     val state: String,
     val message: String,
@@ -77,6 +80,7 @@ object GzmPanel {
     private const val F_CONFIG = "gzm_cfg.bin"
     private const val F_HASH = "gzm_cfg_hash.bin"
     private const val F_CONFIG_SYNCED = "gzm_cfg_synced.bin"
+    private const val F_CONFIG_OWNER = "gzm_cfg_owner.bin"
     private const val F_RECONNECT_UPDATE = "gzm_reconnect_update.bin"
 
     // ---------- token ----------
@@ -94,13 +98,34 @@ object GzmPanel {
         }
     }
 
-    fun saveToken(raw: String) = GzmCrypto.writeSecure(F_TOKEN, raw.trim().toByteArray())
+    fun saveToken(raw: String) {
+        // Preserve ownership of a legacy config snapshot before changing the token. Without
+        // this marker an offline account switch could mistake the previous profile for the new one.
+        if (GzmCrypto.readSecure(F_CONFIG) != null && GzmCrypto.readSecure(F_CONFIG_OWNER) == null) {
+            val priorOwner = loadToken()?.let(::configOwner) ?: "legacy-unowned"
+            GzmCrypto.writeSecure(F_CONFIG_OWNER, priorOwner.toByteArray(Charsets.UTF_8))
+        }
+        GzmCrypto.writeSecure(F_TOKEN, raw.trim().toByteArray())
+    }
     fun loadTokenRaw(): String? = GzmCrypto.readSecure(F_TOKEN)?.let { String(it, Charsets.UTF_8).trim().takeIf { raw -> parseToken(raw) != null } }
     fun loadToken(): GzmToken? = loadTokenRaw()?.let { parseToken(it) }
     fun hasToken() = loadToken() != null
     fun loadStatus(): GzmStatus? = GzmCrypto.readSecure(F_STATUS)?.let { GzmStatus.fromJson(String(it)) }
     private fun saveStatus(s: GzmStatus) = GzmCrypto.writeSecure(F_STATUS, s.toJson().toByteArray())
-    fun hasConfig(): Boolean = GzmCrypto.readSecure(F_CONFIG) != null
+    private fun configOwner(token: GzmToken): String = sha("${token.baseUrl.trimEnd('/')}|${token.sub}")
+    private fun configBelongsTo(token: GzmToken, migrateLegacy: Boolean = true): Boolean {
+        if (GzmCrypto.readSecure(F_CONFIG) == null) return false
+        val saved = GzmCrypto.readSecure(F_CONFIG_OWNER)?.let { String(it, Charsets.UTF_8) }
+        if (saved != null) return saved == configOwner(token)
+        // Existing installs predate the owner marker. Migrate only while the old saved token
+        // is still current; activation records this marker before replacing a token.
+        if (migrateLegacy && loadToken()?.let(::configOwner) == configOwner(token)) {
+            GzmCrypto.writeSecure(F_CONFIG_OWNER, configOwner(token).toByteArray(Charsets.UTF_8))
+            return true
+        }
+        return false
+    }
+    fun hasConfig(): Boolean = loadToken()?.let { configBelongsTo(it) } == true
     fun lastConfigSyncAt(): Long = GzmCrypto.readSecure(F_CONFIG_SYNCED)?.let { String(it).toLongOrNull() } ?: 0L
     fun configRefreshDue(intervalHours: Int = loadStatus()?.configIntervalHours ?: 12): Boolean =
         isGzmConfigRefreshDue(
@@ -113,7 +138,7 @@ object GzmPanel {
     fun clearAll(ctx: Context) {
         setResumeWhenForegrounded(false)
         LauncherManager.stopService(ctx)
-        listOf(F_TOKEN, F_STATUS, F_CONFIG, F_HASH, F_CONFIG_SYNCED, F_RECONNECT_UPDATE).forEach { GzmCrypto.deleteSecure(it) }
+        listOf(F_TOKEN, F_STATUS, F_CONFIG, F_HASH, F_CONFIG_SYNCED, F_CONFIG_OWNER, F_RECONNECT_UPDATE).forEach { GzmCrypto.deleteSecure(it) }
         runCatching { MmkvManager.removeAllServer() }
     }
 
@@ -165,31 +190,46 @@ object GzmPanel {
 
     // ---------- red ----------
     private fun post(ctx: Context, token: GzmToken, refreshConfig: Boolean): Pair<Int, String> {
-        val conn = URL(token.baseUrl + "/api/app/sync").openConnection() as HttpURLConnection
-        try {
-            conn.requestMethod = "POST"
-            conn.connectTimeout = 12000
-            conn.readTimeout = 15000
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("User-Agent", "GZMNET-App/1")
-            conn.setRequestProperty("X-GZM-Device", deviceId(ctx))
-            conn.outputStream.use {
-                it.write(
-                    JSONObject().put("token", token.sub).put("device", deviceId(ctx))
-                        .put("name", deviceName(ctx))
-                        .put("config_hash", GzmCrypto.readSecure(F_HASH)?.let { String(it) } ?: "")
-                        .put("status_only", !refreshConfig)
-                        .toString().toByteArray()
-                )
+        var lastError: Exception? = null
+        repeat(2) { attempt ->
+            val conn = try {
+                gzmOpenPhysicalConnection(ctx, URL(token.baseUrl + "/api/app/sync"))
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt == 0) return@repeat else throw e
             }
-            val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            return code to body
-        } finally {
-            conn.disconnect()
+            try {
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 8000
+                conn.readTimeout = 10000
+                conn.doOutput = true
+                conn.useCaches = false
+                conn.setRequestProperty("Connection", "close")
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("User-Agent", "GZMNET-App/1")
+                conn.setRequestProperty("X-GZM-Device", deviceId(ctx))
+                val currentHash = if (configBelongsTo(token)) GzmCrypto.readSecure(F_HASH)?.let { String(it) }.orEmpty() else ""
+                conn.outputStream.use {
+                    it.write(
+                        JSONObject().put("token", token.sub).put("device", deviceId(ctx))
+                            .put("name", deviceName(ctx))
+                            .put("config_hash", currentHash)
+                            .put("status_only", !refreshConfig)
+                            .toString().toByteArray()
+                    )
+                }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                return code to body
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt == 1) throw e
+            } finally {
+                conn.disconnect()
+            }
         }
+        throw lastError ?: java.io.IOException("No se pudo contactar el panel por la red disponible.")
     }
 
     private fun decryptConfig(sub: String, c: JSONObject): List<String> {
@@ -231,6 +271,7 @@ object GzmPanel {
 
     /** Si el almacén de perfiles falta o está corrupto pero la config cifrada existe, la restaura sin internet. */
     fun ensureProfile() {
+        if (!hasConfig()) return
         val available = MmkvManager.decodeServerList(AppConfig.DEFAULT_SUBSCRIPTION_ID)
         val current = MmkvManager.getSelectServer()
         val selected = selectUsableGzmProfile(current, available) {
@@ -300,17 +341,24 @@ object GzmPanel {
                     val links = decryptConfig(token.sub, o.getJSONObject("config"))
                     if (links.isEmpty()) throw IllegalStateException("El panel envió una lista de servidores vacía")
                     val h = sha(links.joinToString("\n"))
-                    val old = storedConfigHash()
-                    if (h != old || MmkvManager.decodeServerList(AppConfig.DEFAULT_SUBSCRIPTION_ID).isEmpty()) {
-                        val shouldRestart = old != null && GzmAuto.isRunning(ctx)
+                    val ownsSavedConfig = configBelongsTo(token)
+                    val old = if (ownsSavedConfig) storedConfigHash() else null
+                    val selectedProfilesMissing = MmkvManager.decodeServerList(AppConfig.DEFAULT_SUBSCRIPTION_ID).isEmpty()
+                    if (!ownsSavedConfig || h != old || selectedProfilesMissing) {
+                        val shouldRestart = GzmAuto.isRunning(ctx) && (!ownsSavedConfig || old != h || selectedProfilesMissing)
                         if (importLinks(links)) {
                             GzmCrypto.writeSecure(F_CONFIG, JSONArray(links).toString().toByteArray())
                             GzmCrypto.writeSecure(F_HASH, h.toByteArray())
+                            GzmCrypto.writeSecure(F_CONFIG_OWNER, configOwner(token).toByteArray(Charsets.UTF_8))
                             changed = old != null && old != h
-                            if (shouldRestart && changed) LauncherManager.restartService(ctx)
+                            if (shouldRestart) LauncherManager.restartService(ctx)
                         } else {
                             throw IllegalStateException("La app no pudo interpretar los servidores enviados por el panel")
                         }
+                    } else {
+                        // A fresh, authenticated server response with an identical config hash
+                        // can safely claim the existing snapshot for this token; offline reuse alone cannot.
+                        GzmCrypto.writeSecure(F_CONFIG_OWNER, configOwner(token).toByteArray(Charsets.UTF_8))
                     }
                 } catch (e: Exception) {
                     syncError = (e.message ?: "No se pudo descifrar o importar la suscripción").take(180)
