@@ -17,12 +17,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,7 +78,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -323,6 +327,7 @@ error = if (assetsReady) it.error else "Faltan los datos de geolocalización de 
 ).let(loadSettings())
 }
 if (restoredUpdateId != null) pendingInstallId = restoredUpdateId
+refreshPaymentReminder()
 tryStartDeferredConnect()
 GzmAuto.apply(getApplication())
 // Startup and connection use the encrypted local profile. Status refresh is deferred to
@@ -355,6 +360,17 @@ val attempt = ++startAttemptId
 val startedAt = SystemClock.elapsedRealtime()
 startAttemptStartedAt = startedAt
 _ui.update { it.copy(starting = true, running = false, error = null) }
+// The daemon runs in a separate Android process. Reconcile its authoritative state while the
+// screen is open so a missed startup broadcast cannot leave the control stuck until app reopen.
+viewModelScope.launch {
+    repeat(15) {
+        delay(2_000)
+        if (startAttemptId != attempt || !_ui.value.starting || !activityVisible) return@launch
+        MessageHelper.sendMsg2ServiceForState(getApplication(), AppConfig.MSG_REGISTER_CLIENT, "") { resultCode ->
+            if (startAttemptId == attempt && _ui.value.starting && isGzmDaemonReportedRunning(resultCode)) markRunning()
+        }
+    }
+}
 viewModelScope.launch {
 delay(GZM_STARTUP_TIMEOUT_MS)
 if (startAttemptId == attempt && _ui.value.starting && hasGzmStartupTimedOut(startedAt, SystemClock.elapsedRealtime())) {
@@ -379,6 +395,11 @@ _ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDo
 }
 fun stopRequested() { connectAfterPermission = false; resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
 fun stopFallback() { connectAfterPermission = false; resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
+fun refreshPaymentReminder() {
+    viewModelScope.launch(Dispatchers.IO) {
+        runCatching { GzmPaymentReminder.notifyIfDue(getApplication(), GzmPanel.loadStatus()?.expiry) }
+    }
+}
 fun refresh() {
 if (!GzmPanel.hasToken()) return
 viewModelScope.launch {
@@ -392,6 +413,7 @@ _ui.update { it.copy(syncing = false, assetsReady = false, error = "Faltan los d
 return@launch
 }
 val r = GzmPanel.sync(getApplication(), refreshConfig = true)
+GzmPaymentReminder.notifyIfDue(getApplication(), r.status?.expiry)
 if (r.offline) panelFailureCount = (panelFailureCount + 1).coerceAtMost(5) else panelFailureCount = 0
 val stillHas = GzmPanel.hasToken()
 _ui.update {
@@ -502,6 +524,7 @@ viewModelScope.launch {
 if (!panelSyncMutex.tryLock()) return@launch
 try {
 val r = GzmPanel.sync(getApplication(), refreshConfig = false)
+GzmPaymentReminder.notifyIfDue(getApplication(), r.status?.expiry)
 if (r.offline) panelFailureCount = (panelFailureCount + 1).coerceAtMost(5) else panelFailureCount = 0
 val stillHas = GzmPanel.hasToken()
 _ui.update { current ->
@@ -558,6 +581,7 @@ val (r, assetsReady) = coroutineScope {
     val response = GzmPanel.sync(getApplication(), refreshConfig = true)
     response to assets.await()
 }
+GzmPaymentReminder.notifyIfDue(getApplication(), r.status?.expiry)
 if (r.offline) panelFailureCount = (panelFailureCount + 1).coerceAtMost(5) else panelFailureCount = 0
 // Never show the previous account's cached status after an offline token switch.
 val st = if (sameAccount || !r.offline) r.status else null
@@ -729,6 +753,41 @@ runCatching { MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_UNRE
 runCatching { getApplication<Application>().unregisterReceiver(receiver) }
 }
 }
+@Composable
+private fun ClickableNotice(message: String, modifier: Modifier = Modifier, color: Color, fontSize: androidx.compose.ui.unit.TextUnit) {
+    val uriHandler = LocalUriHandler.current
+    val annotated = remember(message) {
+        buildAnnotatedString {
+            val regex = Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE)
+            var cursor = 0
+            regex.findAll(message).forEach { match ->
+                append(message.substring(cursor, match.range.first))
+                val raw = match.value
+                val url = raw.trimEnd('.', ',', '!', '?', ';', ':', ')', ']', '}', '"', '\'')
+                if (url.isNotEmpty()) {
+                    pushStringAnnotation(tag = "URL", annotation = url)
+                    pushStyle(SpanStyle(color = Blue, textDecoration = TextDecoration.Underline, fontWeight = FontWeight.Medium))
+                    append(url)
+                    pop()
+                    pop()
+                    append(raw.substring(url.length))
+                } else append(raw)
+                cursor = match.range.last + 1
+            }
+            append(message.substring(cursor))
+        }
+    }
+    ClickableText(
+        text = annotated,
+        modifier = modifier,
+        style = TextStyle(color = color, fontSize = fontSize, textAlign = TextAlign.Center),
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                .firstOrNull()?.let { annotation -> runCatching { uriHandler.openUri(annotation.item) } }
+        },
+    )
+}
+
 class GzmActivity : ComponentActivity() {
 private val vm: GzmViewModel by viewModels()
 private var connectivityManager: ConnectivityManager? = null
@@ -740,10 +799,11 @@ if (it.resultCode == RESULT_OK) {
 if (vm.ui.value.canConnect) { vm.onVpnPermissionGranted(); startVpnNow() } else vm.deferConnectUntilReady()
 } else vm.startFailed("Se necesita permiso de VPN para conectar.")
 }
-private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+if (granted) vm.refreshPaymentReminder()
+}
 override fun onCreate(savedInstanceState: Bundle?) {
 super.onCreate(savedInstanceState)
-window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
 val uiMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
 val isTv = packageManager.hasSystemFeature("android.software.leanback") ||
 packageManager.hasSystemFeature("android.hardware.type.television") ||
@@ -997,7 +1057,7 @@ Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Blue.c
 Text(st?.name?.ifBlank { "Cuenta GZMNET" } ?: "Cuenta GZMNET", color = Blue, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
 if (!accountNotice.isNullOrBlank()) {
 Spacer(Modifier.height(6.dp))
-Text(accountNotice, color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
+ClickableNotice(accountNotice, modifier = Modifier.fillMaxWidth(), color = Color.White, fontSize = 12.sp)
 }
 }
 Spacer(Modifier.height(14.dp))

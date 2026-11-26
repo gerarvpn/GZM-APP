@@ -140,7 +140,8 @@ object CoreServiceManager {
 
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Starting core loop for ${config.remarks}")
         val result = CoreConfigManager.getV2rayConfig(service, guid)
-        LogUtil.d(AppConfig.TAG, result.content)
+        // Never write the decrypted server configuration to Logcat; it contains the real host, credentials, and subscription parameters.
+        LogUtil.d(AppConfig.TAG, "GZM profile decoded for connection (content hidden)")
         if (!result.status) {
             error(result.errorMessage.ifBlank { "Failed to get V2Ray config" })
         }
