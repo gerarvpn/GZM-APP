@@ -16,22 +16,4 @@ class GzmPanelOfflineDecisionTest {
         assertTrue(isPanelOfflineAfterFailures(2))
         assertTrue(isPanelOfflineAfterFailures(5))
     }
-
-    @Test
-    fun `connected screen forces ping without waiting for normal interval`() {
-        assertTrue(shouldSendGzmPing(force = true, hasPending = false, pendingAgeMs = 0L, sinceLastRequestMs = 1L))
-    }
-
-    @Test
-    fun `recent pending ping is never duplicated even by a forced resume request`() {
-        assertFalse(shouldSendGzmPing(force = false, hasPending = true, pendingAgeMs = 5_000L, sinceLastRequestMs = 20_000L))
-        assertFalse(shouldSendGzmPing(force = true, hasPending = true, pendingAgeMs = 5_000L, sinceLastRequestMs = 20_000L))
-    }
-
-    @Test
-    fun `lost ping can retry after timeout and idle ping uses ten second interval`() {
-        assertTrue(shouldSendGzmPing(force = false, hasPending = true, pendingAgeMs = 25_000L, sinceLastRequestMs = 25_000L))
-        assertFalse(shouldSendGzmPing(force = false, hasPending = false, pendingAgeMs = 0L, sinceLastRequestMs = 9_999L))
-        assertTrue(shouldSendGzmPing(force = false, hasPending = false, pendingAgeMs = 0L, sinceLastRequestMs = 10_000L))
-    }
 }

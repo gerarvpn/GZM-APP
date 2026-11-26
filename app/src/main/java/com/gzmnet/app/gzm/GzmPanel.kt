@@ -111,6 +111,7 @@ object GzmPanel {
         )
 
     fun clearAll(ctx: Context) {
+        setResumeWhenForegrounded(false)
         LauncherManager.stopService(ctx)
         listOf(F_TOKEN, F_STATUS, F_CONFIG, F_HASH, F_CONFIG_SYNCED, F_RECONNECT_UPDATE).forEach { GzmCrypto.deleteSecure(it) }
         runCatching { MmkvManager.removeAllServer() }
@@ -138,6 +139,15 @@ object GzmPanel {
     }
 
     private const val K_RECONNECT_AFTER_UPDATE = "gzm_reconnect_after_update"
+    private const val K_RESUME_WHEN_FOREGROUND = "gzm_resume_when_foreground"
+
+    /** Records an established tunnel so the UI can restore it if Android kills its daemon. */
+    fun setResumeWhenForegrounded(enabled: Boolean) = runCatching {
+        MmkvManager.encodeSettings(K_RESUME_WHEN_FOREGROUND, if (enabled) "1" else "0")
+    }
+
+    fun resumeWhenForegrounded(): Boolean =
+        MmkvManager.decodeSettingsString(K_RESUME_WHEN_FOREGROUND) == "1"
 
     /** This is a non-secret control flag; store it in MMKV to avoid synchronous Keystore work on tap. */
     fun setReconnectAfterUpdate(enabled: Boolean) = runCatching {
@@ -316,6 +326,7 @@ object GzmPanel {
         }
         if (!status.isActive) {
             setReconnectAfterUpdate(false)
+            setResumeWhenForegrounded(false)
             LauncherManager.stopService(ctx)
         }
         GzmSyncResult(status, offline = false, configChanged = changed, error = syncError)

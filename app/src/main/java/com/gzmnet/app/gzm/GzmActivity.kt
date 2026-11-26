@@ -8,8 +8,8 @@ import android.content.ClipboardManager
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
-import android.net.VpnService
 import android.net.ConnectivityManager
+import android.net.VpnService
 import android.net.Network
 import android.os.Build
 import android.os.Bundle
@@ -92,8 +92,6 @@ import com.gzmnet.app.AppConfig
 import com.gzmnet.app.R
 import com.gzmnet.app.core.LauncherManager
 import com.gzmnet.app.helper.MessageHelper
-import com.gzmnet.app.dto.ConnectionTestResult
-import com.gzmnet.app.helper.MessageHelper.EXTRA_REQUEST_ID
 import com.gzmnet.app.handler.MmkvManager
 import com.gzmnet.app.util.Utils
 import kotlinx.coroutines.Dispatchers
@@ -110,17 +108,9 @@ import java.util.Date
 import java.util.Locale
 internal fun isPanelOfflineAfterFailures(failures: Int): Boolean = failures >= 2
 
-internal fun shouldSendGzmPing(force: Boolean, hasPending: Boolean, pendingAgeMs: Long, sinceLastRequestMs: Long): Boolean =
-    (!hasPending || pendingAgeMs >= 25_000L) && (force || sinceLastRequestMs >= 10_000L)
-
 internal const val GZM_STARTUP_TIMEOUT_MS = 90_000L
 internal fun hasGzmStartupTimedOut(startedAtMs: Long, nowMs: Long): Boolean =
     nowMs - startedAtMs >= GZM_STARTUP_TIMEOUT_MS
-internal fun isGzmConnectionProbeFailure(delayMillis: Long): Boolean = delayMillis < 0L
-
-internal fun gzmPingRetryDelayMs(failureCount: Int, pipeClosed: Boolean): Long =
-    if (pipeClosed) 60_000L else (30_000L shl (failureCount.coerceAtLeast(1) - 1).coerceAtMost(2)).coerceAtMost(120_000L)
-
 internal fun gzmStartupTimeoutDetail(phase: String): String =
     "El túnel no confirmó el inicio en 90 segundos. Última fase: ${phase.ifBlank { "esperando respuesta del servicio VPN" }}."
 
@@ -182,13 +172,23 @@ val updProgress: Int = -1,
 val pendingUpdateInstall: Boolean = false,
 val appRateUp: Long = 0,
 val appRateDown: Long = 0,
-val serverPingMs: Long? = null,
 ) {
 val canConnect: Boolean get() = canStartFromLocalConfig(hasToken, hasConfig, assetsReady)
 }
 
 internal fun canStartFromLocalConfig(hasToken: Boolean, hasConfig: Boolean, assetsReady: Boolean): Boolean =
     hasToken && hasConfig && assetsReady
+
+internal fun shouldResumeGzmVpn(
+    resumeWasRequested: Boolean,
+    activityVisible: Boolean,
+    alreadyStarting: Boolean,
+    hasToken: Boolean,
+    hasConfig: Boolean,
+    assetsReady: Boolean,
+    vpnPermissionGranted: Boolean,
+): Boolean = resumeWasRequested && activityVisible && !alreadyStarting &&
+    canStartFromLocalConfig(hasToken, hasConfig, assetsReady) && vpnPermissionGranted
 
 class GzmViewModel(app: Application) : AndroidViewModel(app) {
 private val _ui = MutableStateFlow(GzmUi())
@@ -202,12 +202,8 @@ private var installLaunchInProgress = false
 private val panelSyncMutex = Mutex()
 @Volatile private var lastConfigAttemptAt = 0L
 @Volatile private var panelFailureCount = 0
-@Volatile private var pingPendingId = ""
-@Volatile private var lastPingRequestAt = 0L
-@Volatile private var pingRetryAfterAt = 0L
-@Volatile private var pingFailureCount = 0
-@Volatile private var lastPingDiagnosticAt = 0L
 @Volatile private var activityVisible = false
+@Volatile private var resumeWhenForegrounded = GzmPanel.resumeWhenForegrounded()
 private val receiver = object : BroadcastReceiver() {
 override fun onReceive(context: Context?, intent: Intent?) {
 when (intent?.getIntExtra("key", 0)) {
@@ -221,33 +217,6 @@ val up = parts.getOrNull(0)?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
 val down = parts.getOrNull(1)?.toLongOrNull()?.coerceAtLeast(0L) ?: 0L
 _ui.update { it.copy(appRateUp = up, appRateDown = down) }
 }
-AppConfig.MSG_MEASURE_DELAY_RESULT -> {
-val requestId = intent?.getStringExtra(EXTRA_REQUEST_ID).orEmpty()
-val result = intent?.getSerializableExtra("content") as? ConnectionTestResult
-if (requestId == pingPendingId && result != null) {
-pingPendingId = ""
-if (isGzmConnectionProbeFailure(result.delayMillis)) {
-val pipeClosed = isGzmCorePipeClosed(result.errorMessage)
-pingFailureCount = (pingFailureCount + 1).coerceAtMost(4)
-pingRetryAfterAt = System.currentTimeMillis() + gzmPingRetryDelayMs(pingFailureCount, pipeClosed)
-if (!pipeClosed && System.currentTimeMillis() - lastPingDiagnosticAt >= 5 * 60_000L) {
-lastPingDiagnosticAt = System.currentTimeMillis()
-GzmDiagnostics.recordMessage(app, "Conexión", "La VPN sigue activa, pero el sondeo de latencia falló (${result.errorMessage.ifBlank { "sin respuesta" }}). Se reintentará más tarde.")
-}
-_ui.update { it.copy(serverPingMs = null, error = if (it.error?.startsWith("La VPN está activa") == true) null else it.error) }
-} else {
-pingFailureCount = 0
-pingRetryAfterAt = 0L
-_ui.update { it.copy(serverPingMs = result.delayMillis, error = if (it.error?.startsWith("La VPN está activa") == true) null else it.error) }
-}
-}
-}
-AppConfig.MSG_MEASURE_DELAY_CANCEL -> {
-if (intent?.getStringExtra(EXTRA_REQUEST_ID).orEmpty() == pingPendingId) {
-pingPendingId = ""
-pingRetryAfterAt = maxOf(pingRetryAfterAt, System.currentTimeMillis() + 10_000L)
-}
-}
 AppConfig.MSG_STATE_RUNNING -> markRunning()
 AppConfig.MSG_STATE_START_SUCCESS -> {
 // Ignore a late startup callback after the user cancelled or the startup watchdog expired.
@@ -256,14 +225,13 @@ if (_ui.value.starting) markRunning()
 AppConfig.MSG_STATE_NOT_RUNNING -> {
 if (!_ui.value.starting) {
 startupPhaseForDiagnostic = ""
-pingPendingId = ""
-_ui.update { it.copy(running = false, serverPingMs = null, appRateUp = 0, appRateDown = 0) }
+_ui.update { it.copy(running = false, appRateUp = 0, appRateDown = 0) }
+resumeFromLocalProfileIfNeeded()
 }
 }
 AppConfig.MSG_STATE_STOP_SUCCESS -> {
 startupPhaseForDiagnostic = ""
-pingPendingId = ""
-_ui.update { it.copy(running = false, starting = false, serverPingMs = null, appRateUp = 0, appRateDown = 0) }
+_ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) }
 }
 AppConfig.MSG_STATE_START_FAILURE -> {
 val detail = intent?.getStringExtra("content")?.trim().orEmpty()
@@ -292,12 +260,6 @@ val now = System.currentTimeMillis()
 val retryWindow = if (panelFailureCount > 0) 30_000L else 60_000L
 if (GzmPanel.configRefreshDue(_ui.value.status?.configIntervalHours ?: 12) && now - lastConfigAttemptAt >= retryWindow) refresh() else refreshLiveStatus()
 }
-}
-}
-viewModelScope.launch {
-while (true) {
-delay(10_000L)
-if (activityVisible && _ui.value.running) requestServerPingIfDue()
 }
 }
 }
@@ -354,10 +316,11 @@ private fun markRunning() {
 startAttemptStartedAt = 0L
 startAttemptId++
 startupPhaseForDiagnostic = ""
+resumeWhenForegrounded = true
+GzmPanel.setResumeWhenForegrounded(true)
 _ui.update { it.copy(running = true, starting = false, error = null) }
 if (activityVisible) {
 MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_START, "")
-requestServerPingIfDue(force = true)
 }
 }
 fun beginPermission() {
@@ -388,11 +351,13 @@ if (startedAt > 0L) GzmDiagnostics.recordMessage(getApplication(), "VPN start fa
 startAttemptStartedAt = 0L
 startAttemptId++
 GzmPanel.setReconnectAfterUpdate(false)
+resumeWhenForegrounded = false
+GzmPanel.setResumeWhenForegrounded(false)
 startupPhaseForDiagnostic = ""
 _ui.update { it.copy(starting = false, running = false, appRateUp = 0, appRateDown = 0, error = message) }
 }
-fun stopRequested() { startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
-fun stopFallback() { startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
+fun stopRequested() { resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptId++; _ui.update { it.copy(starting = true, error = null) } }
+fun stopFallback() { resumeWhenForegrounded = false; GzmPanel.setResumeWhenForegrounded(false); startAttemptStartedAt = 0L; startAttemptId++; _ui.update { it.copy(running = false, starting = false, appRateUp = 0, appRateDown = 0) } }
 fun refresh() {
 if (!GzmPanel.hasToken()) return
 viewModelScope.launch {
@@ -428,38 +393,46 @@ panelSyncMutex.unlock()
 }
 }
 fun setActivityVisible(visible: Boolean) {
-activityVisible = visible
-if (!visible) pingPendingId = ""
-_ui.update { current ->
-if (visible) current.copy(running = false, serverPingMs = null, appRateUp = 0, appRateDown = 0)
-else current.copy(appRateUp = 0, appRateDown = 0)
-}
-if (visible) {
-// Ask the daemon for its real state first. A cached UI flag is not proof that its pipe/core is alive.
-MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_REGISTER_CLIENT, "")
-} else {
+if (!visible) {
+resumeWhenForegrounded = resumeWhenForegrounded || (_ui.value.running && !_ui.value.starting)
+activityVisible = false
+_ui.update { it.copy(appRateUp = 0, appRateDown = 0) }
 MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_GZM_TRAFFIC_STOP, "")
+return
 }
+activityVisible = true
+_ui.update { it.copy(running = false, appRateUp = 0, appRateDown = 0) }
+// The daemon remains authoritative. The ordered acknowledgment lets the UI recover from
+// its cached profile when Android has already killed the old foreground VPN service.
+MessageHelper.sendMsg2ServiceForResult(getApplication(), AppConfig.MSG_REGISTER_CLIENT, "") { handled ->
+    if (!handled) resumeFromLocalProfileIfNeeded()
+}
+}
+
+private fun resumeFromLocalProfileIfNeeded() {
+    if (!resumeWhenForegrounded || !activityVisible) return
+    viewModelScope.launch {
+        val app = getApplication<Application>()
+        val localState = withContext(Dispatchers.IO) {
+            val permissionGranted = runCatching { VpnService.prepare(app) == null }.getOrDefault(false)
+            Triple(GzmPanel.hasToken(), GzmPanel.hasConfig(), permissionGranted)
+        }
+        val current = _ui.value
+        if (!shouldResumeGzmVpn(resumeWhenForegrounded, activityVisible, current.starting,
+                localState.first, localState.second, current.assetsReady, localState.third)) return@launch
+        resumeWhenForegrounded = false
+        GzmPanel.setReconnectAfterUpdate(true)
+        beginStart()
+        val started = withContext(Dispatchers.IO) { LauncherManager.startGzmVpnServiceFromCachedProfile(app) }
+        if (!started && _ui.value.starting) {
+            startFailed("No se pudo reanudar la VPN desde el perfil guardado. Toca conectar para volver a intentarlo.")
+        }
+    }
 }
 fun onNetworkAvailable() {
 if (activityVisible) {
 if (GzmPanel.hasToken() && GzmPanel.configRefreshDue(_ui.value.status?.configIntervalHours ?: 12)) refresh() else refreshLiveStatus()
 }
-}
-private fun requestServerPingIfDue(force: Boolean = false) {
-if (!activityVisible || !_ui.value.running) return
-val now = System.currentTimeMillis()
-if (now < pingRetryAfterAt) return
-val hasPending = pingPendingId.isNotEmpty()
-val pendingAge = if (hasPending) now - lastPingRequestAt else Long.MAX_VALUE
-val sinceLastRequest = if (lastPingRequestAt == 0L) Long.MAX_VALUE else now - lastPingRequestAt
-if (!shouldSendGzmPing(force, hasPending, pendingAge, sinceLastRequest)) return
-// A forced refresh or stale daemon response replaces the old request; late replies are ignored by ID.
-pingPendingId = ""
-val id = java.util.UUID.randomUUID().toString()
-pingPendingId = id
-lastPingRequestAt = now
-runCatching { MessageHelper.sendMsg2Service(getApplication(), AppConfig.MSG_MEASURE_DELAY, id) }
 }
 fun refreshLiveStatus() {
 if (!GzmPanel.hasToken()) return
@@ -537,6 +510,8 @@ panelSyncMutex.unlock()
 }
 fun logout() {
 GzmPanel.setReconnectAfterUpdate(false)
+resumeWhenForegrounded = false
+GzmPanel.setResumeWhenForegrounded(false)
 // Stop now and clear the UI state optimistically; do not wait for the service broadcast,
 // which can be lost while an updated process is reconnecting.
 runCatching { LauncherManager.stopService(getApplication()) }
@@ -860,11 +835,10 @@ TextButton(onClick = onOpenSettings) { Text("Vincular cuenta", color = Blue) }
 if (ui.running) {
 Spacer(Modifier.height(10.dp))
 Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Card2).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-Column(Modifier.weight(1f)) {
+Column(Modifier.fillMaxWidth()) {
 Text("Tráfico actual", color = Muted, fontSize = 11.sp)
 Text("↑ ${fmtRate(ui.appRateUp)}   ↓ ${fmtRate(ui.appRateDown)}", color = Green, fontSize = 15.sp, fontWeight = FontWeight.Bold)
 }
-Text(ui.serverPingMs?.let { "Ping del servidor · ${it} ms" } ?: "Ping del servidor · —", color = Blue, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
 }
 }
 Spacer(Modifier.height(18.dp))
@@ -917,8 +891,6 @@ Spacer(Modifier.height(14.dp))
 }
 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Card).padding(18.dp)) {
 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Blue.copy(alpha = .14f)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-Text("Cliente", color = Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-Spacer(Modifier.height(4.dp))
 Text(st?.name?.ifBlank { "Cuenta GZMNET" } ?: "Cuenta GZMNET", color = Blue, fontWeight = FontWeight.Bold, fontSize = 18.sp, textAlign = TextAlign.Center)
 if (!accountNotice.isNullOrBlank()) {
 Spacer(Modifier.height(6.dp))

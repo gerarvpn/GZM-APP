@@ -530,6 +530,9 @@ object CoreServiceManager {
             val serviceControl = serviceControl?.get() ?: return
             when (intent?.getIntExtra("key", 0)) {
                 AppConfig.MSG_REGISTER_CLIENT -> {
+                    // Acknowledge the ordered state query so the UI can recover from its local profile
+                    // if Android has already removed this daemon process.
+                    if (isOrderedBroadcast) resultCode = Activity.RESULT_OK
                     if (isRunning()) {
                         MessageHelper.sendMsg2UI(serviceControl.getService(), AppConfig.MSG_STATE_RUNNING, "")
                     } else {
