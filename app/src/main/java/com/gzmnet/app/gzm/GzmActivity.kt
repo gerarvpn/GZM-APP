@@ -123,11 +123,23 @@ internal fun gzmPingRetryDelayMs(failureCount: Int, pipeClosed: Boolean): Long =
 internal fun gzmStartupTimeoutDetail(phase: String): String =
     "El túnel no confirmó el inicio en 90 segundos. Última fase: ${phase.ifBlank { "esperando respuesta del servicio VPN" }}."
 
-internal fun gzmAccountNotice(message: String?, title: String?, expiry: String?, today: java.time.LocalDate): String? {
-    val genericStatusMessages = setOf("activo", "activa", "active", "vencido", "vencida", "expired", "desactivado", "desactivada", "disabled", "cuenta activa", "cuenta está activa", "account active", "account is active", "sin cupo de datos", "límite de dispositivos", "limite de dispositivos", "sin servidores disponibles")
-    val cleanMessages = listOfNotNull(title, message).map { it.trim() }
+internal fun gzmServerDisplayName(title: String?): String {
+    val candidate = title?.trim().orEmpty()
+    val normalized = candidate.lowercase(Locale.ROOT).trimEnd('.', '!', ' ')
+    val generic = setOf("activo", "activa", "active", "inactivo", "inactiva", "inactive", "vencido", "vencida", "expired", "desactivado", "desactivada", "disabled")
+    return candidate.takeIf { it.isNotEmpty() && normalized !in generic } ?: "GZMNET VPN"
+}
+
+internal fun gzmServerStatusLabel(state: String?): String = when (state?.trim()?.lowercase(Locale.ROOT)) {
+    "active" -> "Activo"
+    null, "" -> "Sin verificar"
+    else -> "Inactivo"
+}
+
+internal fun gzmAccountNotice(message: String?, expiry: String?, today: java.time.LocalDate): String? {
+    val genericStatusMessages = setOf("activo", "activa", "active", "inactivo", "inactiva", "inactive", "vencido", "vencida", "expired", "desactivado", "desactivada", "disabled", "cuenta activa", "cuenta está activa", "account active", "account is active", "sin cupo de datos", "límite de dispositivos", "limite de dispositivos", "sin servidores disponibles")
+    val cleanMessages = listOfNotNull(message).map { it.trim() }
         .filter { it.isNotEmpty() && it.lowercase(Locale.ROOT).trimEnd('.', '!', ' ') !in genericStatusMessages }
-        .distinct()
     val expiryDate = expiry?.trim()?.take(10)?.let { raw ->
         runCatching { java.time.LocalDate.parse(raw) }.getOrNull()
             ?: runCatching { java.time.LocalDate.parse(raw, java.time.format.DateTimeFormatter.ofPattern("dd/MM/uuuu", Locale.US)) }.getOrNull()
@@ -868,12 +880,33 @@ else -> "Toca para conectar"
 fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
 color = if (ui.running) Green else if (blocked) Red else Color.White
 )
-val accountNotice = gzmAccountNotice(st?.message, st?.title, st?.expiry, java.time.LocalDate.now())
+val accountNotice = gzmAccountNotice(st?.message, st?.expiry, java.time.LocalDate.now())
 if (!ui.offline && !ui.error.isNullOrBlank()) {
 Spacer(Modifier.height(8.dp))
 Text(ui.error, modifier = Modifier.fillMaxWidth(), color = Red, fontSize = 12.sp, textAlign = TextAlign.Center)
 }
-Spacer(Modifier.height(24.dp))
+Spacer(Modifier.height(12.dp))
+if (ui.hasToken) {
+val serverStatus = gzmServerStatusLabel(st?.state)
+val serverStatusColor = when (serverStatus) {
+"Activo" -> Green
+"Inactivo" -> Red
+else -> Amber
+}
+Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Card2).padding(horizontal = 16.dp, vertical = 13.dp), verticalAlignment = Alignment.CenterVertically) {
+Column(Modifier.weight(1f)) {
+Text("Servidor", color = Muted, fontSize = 11.sp)
+Spacer(Modifier.height(3.dp))
+Text(gzmServerDisplayName(st?.title), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+}
+Row(Modifier.clip(RoundedCornerShape(50)).background(serverStatusColor.copy(alpha = .14f)).padding(horizontal = 11.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+Box(Modifier.size(7.dp).clip(CircleShape).background(serverStatusColor))
+Spacer(Modifier.width(6.dp))
+Text(serverStatus, color = serverStatusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+}
+}
+}
+Spacer(Modifier.height(12.dp))
 if (blocked) {
 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Red.copy(alpha = 0.16f)).padding(16.dp)) {
 Text(st?.message.orEmpty(), color = Red, fontWeight = FontWeight.Bold)
